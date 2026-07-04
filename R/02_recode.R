@@ -74,7 +74,7 @@ recode_registry <- function(raw) {
         as_code(.data[["Ambulation"]]) == "1"            ~ "Ambulatory",
         as_code(.data[["Ambulation"]]) %in% c("2","5","6") ~ "Assisted",
         as_code(.data[["Ambulation"]]) %in% c("3","4")   ~ "Non-ambulatory",
-        TRUE                                             ~ NA_character_
+        TRUE                                             ~ "Unknown"
       ),
       coronary_disease = is_present(.data[["CAD"]]) |
                          is_present(.data[["Prior CABG"]]) |
@@ -115,6 +115,13 @@ recode_registry <- function(raw) {
           TRUE               ~ NA_character_
         ),
         levels = c("Asymptomatic", "Claudication", "Rest pain", "Tissue loss")
+      ),
+      # Collapsed presentation used for matching: rest pain or tissue loss is
+      # CLTI, everything else (claudication or asymptomatic) is non-CLTI. This
+      # removes the sparse cells that destabilized the propensity model.
+      clti = factor(
+        dplyr::if_else(severity_rank >= 2, "CLTI", "Claudication"),
+        levels = c("Claudication", "CLTI")
       ),
       presentation = dplyr::case_when(
         severity_rank >= 2 ~ "CLTI",

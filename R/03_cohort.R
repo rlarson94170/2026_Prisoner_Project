@@ -89,7 +89,7 @@ build_cohort <- function(proc,
       diabetes_any, diabetes_insulin, dialysis, hypertension, current_smoker,
       statin, ace_arb, antiplatelet, anticoagulant,
       prior_ipsi_revasc, prior_amputation,
-      limb_severity, presentation
+      clti, limb_severity, presentation
     ) %>%
     dplyr::mutate(
       inmate = factor(inmate, levels = c(0, 1),

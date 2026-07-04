@@ -17,6 +17,19 @@ test_that("leg severity takes the worse of the two legs", {
   expect_equal(rc$presentation, c("CLTI", "Asymptomatic", "CLTI"))
 })
 
+test_that("CLTI collapse folds rest pain and tissue loss into CLTI", {
+  raw <- make_raw(
+    make_proc("A", "2019-01-01", sev_r = "5",  sev_l = "0"),  # tissue loss -> CLTI
+    make_proc("B", "2019-01-01", sev_r = "4",  sev_l = "0"),  # rest pain   -> CLTI
+    make_proc("C", "2019-01-01", sev_r = "9",  sev_l = "0"),  # claudication -> not CLTI
+    make_proc("D", "2019-01-01", sev_r = "0",  sev_l = "0")   # asymptomatic -> not CLTI
+  )
+  rc <- recode_registry(raw)
+  expect_equal(as.character(rc$clti),
+               c("CLTI", "CLTI", "Claudication", "Claudication"))
+  expect_equal(levels(rc$clti), c("Claudication", "CLTI"))
+})
+
 test_that("comorbidity composites decode correctly", {
   raw <- make_raw(
     make_proc("A", "2019-01-01", Diabetes = "3", CHF = "2", COPD = "3",

@@ -1,5 +1,6 @@
-# Tests for the matching step in 04_match.R. These need MatchIt, cobalt, and
-# tableone; the suite skips cleanly if they are not installed.
+# Tests for the matching step in 04_match.R. These need MatchIt, optmatch,
+# cobalt, and (for a weighted Table 1) survey; the suite skips cleanly if any
+# are missing.
 
 make_analytic <- function(n_inmate = 15, n_ctrl = 150, seed = 1) {
   set.seed(seed)
@@ -28,59 +29,67 @@ make_analytic <- function(n_inmate = 15, n_ctrl = 150, seed = 1) {
                                     n, TRUE),
                              levels = c("Asymptomatic", "Claudication",
                                         "Rest pain", "Tissue loss"))
-    )
+    ) %>%
+      dplyr::mutate(
+        clti = factor(
+          dplyr::if_else(limb_severity %in% c("Rest pain", "Tissue loss"),
+                         "CLTI", "Claudication"),
+          levels = c("Claudication", "CLTI"))
+      )
   }
   dplyr::bind_rows(
     gen(n_inmate, shift = 2) %>% dplyr::mutate(inmate = "Inmate"),
     gen(n_ctrl,   shift = 0) %>% dplyr::mutate(inmate = "Non-inmate")
   ) %>%
     dplyr::mutate(
-      inmate   = factor(inmate, levels = c("Non-inmate", "Inmate")),
-      race     = factor(race),
+      inmate     = factor(inmate, levels = c("Non-inmate", "Inmate")),
+      race       = factor(race),
       ambulation = factor(ambulation),
-      urgency  = factor(urgency),
-      study_id = sprintf("PID%04d", dplyr::row_number())
+      urgency    = factor(urgency),
+      study_id   = sprintf("PID%04d", dplyr::row_number())
     )
 }
 
-test_that("matching respects the ratio and matches without replacement", {
+test_that("full matching retains all inmates and reuses no control", {
   skip_if_not_installed("MatchIt")
+  skip_if_not_installed("optmatch")
   skip_if_not_installed("cobalt")
-  skip_if_not_installed("tableone")
 
   analytic <- make_analytic()
   tmp_out <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))
-  res <- run_matching(analytic, ratio = 3, caliper = 0.5, out_dir = tmp_out)
+  res <- run_matching(analytic, out_dir = tmp_out)
   m <- res$matched
 
-  n_inm <- sum(m$inmate == "Inmate")
-  n_ctl <- sum(m$inmate == "Non-inmate")
-  expect_gt(n_inm, 0)
-  expect_lte(n_ctl, 3 * n_inm)                 # at most 3 controls per inmate
+  # Full matching keeps every treated unit.
+  expect_equal(sum(m$inmate == "Inmate"), sum(analytic$inmate == "Inmate"))
+  # Each control sits in exactly one subclass, so IDs stay unique.
   ctl_ids <- m$study_id[m$inmate == "Non-inmate"]
-  expect_equal(anyDuplicated(ctl_ids), 0L)     # no control used twice
+  expect_equal(anyDuplicated(ctl_ids), 0L)
 })
 
-test_that("matching improves overall balance", {
+test_that("matching improves balance on the matching covariates", {
   skip_if_not_installed("MatchIt")
+  skip_if_not_installed("optmatch")
   skip_if_not_installed("cobalt")
 
   analytic <- make_analytic()
   tmp_out <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))
-  res <- run_matching(analytic, ratio = 3, caliper = 0.5, out_dir = tmp_out)
-  bal <- res$balance$Balance
-  expect_lt(max(abs(bal$Diff.Adj), na.rm = TRUE),
-            max(abs(bal$Diff.Un),  na.rm = TRUE))
+  res <- run_matching(analytic, out_dir = tmp_out)
+  b <- res$balance_matched$Balance
+  expect_lt(max(abs(b$Diff.Adj), na.rm = TRUE),
+            max(abs(b$Diff.Un),  na.rm = TRUE))
+  expect_type(res$max_smd_matched, "double")
 })
 
 test_that("matching writes all expected output files", {
   skip_if_not_installed("MatchIt")
+  skip_if_not_installed("optmatch")
   skip_if_not_installed("cobalt")
   skip_if_not_installed("tableone")
 
   analytic <- make_analytic()
   tmp_out <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))
-  run_matching(analytic, ratio = 3, caliper = 0.5, out_dir = tmp_out)
+  run_matching(analytic, out_dir = tmp_out)
   for (f in c("balance_table.txt", "love_plot.png",
               "table1_matched.csv", "matched_cohort.rds")) {
     expect_true(file.exists(file.path(tmp_out, f)), info = f)

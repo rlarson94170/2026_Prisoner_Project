@@ -1,5 +1,8 @@
 # Prisoner PAD analysis
 
+<!-- Replace OWNER/REPO with your GitHub path once pushed, e.g. rlarson/prisoner-pad-analysis -->
+[![R tests](https://github.com/OWNER/REPO/actions/workflows/R-tests.yaml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/R-tests.yaml)
+
 Reproducible R pipeline for the study of endovascular outcomes in incarcerated
 versus non-incarcerated patients with peripheral artery disease. The code takes
 the institutional VQI PVI registry export, applies the pre-specified cohort
@@ -43,10 +46,21 @@ no `private/` contents are staged.
 
 ## Matching (`R/04_match.R`)
 
-Nearest-neighbor matching on the logit of the propensity score, caliper 0.2 SD,
-up to 3 controls per inmate, no replacement. Balance is judged by standardized
-mean differences (target < 0.10), reported before and after matching, including
-covariates that were not part of the matching model as a residual-balance check.
+Optimal full matching on the propensity score. Full matching uses every
+control, weighted into subclasses, which balances the covariate set better than
+fixed-ratio nearest neighbor in a small treated group. Balance is judged by
+standardized mean differences (target < 0.10) on the matching covariates.
+
+The matching covariates are age, current smoking, diabetes, dialysis, CLTI
+(limb severity collapsed to chronic limb-threatening ischemia versus not),
+coronary disease, symptomatic CHF, urgency, treated COPD, prior ipsilateral
+revascularization, ambulation, race, and BMI.
+
+Baseline medications (statin, ACE/ARB, antiplatelet, insulin) are deliberately
+**not** matched on. Higher preoperative use of these agents in inmates is part
+of the incarceration effect under study (supervised administration), so they are
+reported as baseline differences rather than balanced away. They appear in the
+balance table and Table 1 for description only.
 
 ## How to run
 

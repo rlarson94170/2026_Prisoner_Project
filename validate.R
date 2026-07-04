@@ -54,11 +54,10 @@ if (!file.exists(here::here("config.R"))) {
   check("Study IDs are well formed",
         all(grepl("^PID[0-9]{4}$", analytic$study_id)))
 
-  mv <- c("age", "current_smoker", "diabetes_any", "dialysis",
-          "limb_severity", "coronary_disease", "chf_symptomatic", "urgency")
   check("Matching covariates are complete",
-        all(stats::complete.cases(analytic[, mv])),
-        note = sprintf("%d rows, %d covariates", nrow(analytic), length(mv)))
+        all(stats::complete.cases(analytic[, match_variables])),
+        note = sprintf("%d rows, %d covariates",
+                       nrow(analytic), length(match_variables)))
 
   check("Both groups are present",
         all(c("Inmate", "Non-inmate") %in% as.character(analytic$inmate)),
@@ -70,10 +69,22 @@ if (!file.exists(here::here("config.R"))) {
   if (requireNamespace("MatchIt", quietly = TRUE) &&
       requireNamespace("cobalt", quietly = TRUE)) {
     res <- run_matching(analytic)
-    max_smd <- max(abs(res$balance$Balance$Diff.Adj), na.rm = TRUE)
-    check("All covariates balanced after matching (max |SMD| < 0.10)",
-          max_smd < 0.10,
-          note = sprintf("max |SMD| = %.3f", max_smd))
+
+    # Pass/fail is judged on the covariates we actually match on.
+    check("Matching covariates balanced after matching (max |SMD| < 0.10)",
+          res$max_smd_matched < 0.10,
+          note = sprintf("max |SMD| = %.3f", res$max_smd_matched))
+
+    # Medications are reported, not balanced. Surface the biggest baseline gap
+    # as information, without failing the run.
+    bf <- res$balance$Balance
+    med_rows <- grepl("^(statin|ace_arb|antiplatelet|anticoagulant|diabetes_insulin)",
+                      rownames(bf))
+    if (any(med_rows)) {
+      worst <- rownames(bf)[med_rows][which.max(abs(bf$Diff.Adj[med_rows]))]
+      message(sprintf("Note: largest reported baseline medication gap is %s (SMD %.3f); reported, not matched.",
+                      worst, bf$Diff.Adj[med_rows][which.max(abs(bf$Diff.Adj[med_rows]))]))
+    }
   } else {
     message("MatchIt/cobalt not installed; skipping matching diagnostics.")
   }

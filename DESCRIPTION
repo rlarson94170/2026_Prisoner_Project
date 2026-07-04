@@ -1,0 +1,31 @@
+Package: prisonerPadAnalysis
+Title: Endovascular PAD Outcomes in Incarcerated vs Non-Incarcerated Patients
+Version: 0.0.0.9000
+Authors@R:
+    person("Study", "Team", role = c("aut", "cre"),
+           email = "study.team@example.org")
+Description: Reproducible pipeline that builds a propensity-matched comparison
+    group from the VQI PVI registry for a study of endovascular peripheral
+    artery disease outcomes in incarcerated versus non-incarcerated patients.
+    This DESCRIPTION exists so continuous integration knows which packages to
+    install; the project is run as scripts, not loaded as a package.
+License: CC0-1.0
+Encoding: UTF-8
+Imports:
+    dplyr,
+    tibble,
+    readr,
+    tidyr,
+    stringr,
+    purrr,
+    ggplot2,
+    readxl,
+    janitor,
+    MatchIt,
+    optmatch,
+    cobalt,
+    tableone,
+    survey,
+    here
+Suggests:
+    testthat (>= 3.0.0)
