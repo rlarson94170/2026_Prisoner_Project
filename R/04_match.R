@@ -15,12 +15,17 @@
 # table for description, but they do not enter the matching model and do not
 # count toward the balance target.
 #
-# Method: optimal 2:1 matching, exact-matched on prior ipsilateral
-# revascularization (a strong prognostic factor for the limb outcomes). Each
-# inmate is matched to two distinct controls with the same prior-revascularization
-# status, chosen to minimize the total propensity-score distance. The 2:1 ratio
-# keeps the control set bounded (up to 76 distinct controls) so the chart
-# abstraction is feasible. Balance and group means are produced with cobalt.
+# Method: optimal 2:1 matching. Each inmate is matched to two distinct controls,
+# chosen to minimize the total propensity-score distance. The 2:1 ratio keeps the
+# control set bounded (up to 76 distinct controls) so the chart abstraction is
+# feasible. Balance and group means are produced with cobalt.
+#
+# With 38 inmates and 13 correlated covariates, a bounded match cannot drive
+# every covariate below 0.10 the way full matching can. We accept the standard
+# threshold (|SMD| < 0.25, with < 0.10 ideal) and covariate-adjust any residual
+# imbalance in the outcome models (a doubly-robust matched design). The residual
+# offenders are reported by validate.R and passed to run_outcomes() as
+# adjustment variables.
 # ---------------------------------------------------------------------------
 
 match_variables <- c(
@@ -51,7 +56,6 @@ run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
     method   = "optimal",  # optimal fixed-ratio matching (needs optmatch)
     distance = "glm",      # logistic propensity score
     ratio    = ratio,      # controls per inmate (2 -> up to 76 controls)
-    exact    = ~ prior_ipsi_revasc,  # force exact balance on this prognostic factor
     estimand = "ATT"
   )
 

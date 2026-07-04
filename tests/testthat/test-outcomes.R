@@ -13,7 +13,9 @@ make_matched <- function(n_inmate = 20, n_ctrl = 60, seed = 7) {
     inmate   = factor(c(rep("Inmate", n_inmate), rep("Non-inmate", n_ctrl)),
                       levels = c("Non-inmate", "Inmate")),
     weights  = runif(n, 0.3, 3),
-    subclass = factor(sample(seq_len(n_inmate), n, replace = TRUE))
+    subclass = factor(sample(seq_len(n_inmate), n, replace = TRUE)),
+    # a matching covariate carried through for doubly-robust adjustment tests
+    prior_ipsi_revasc = rbinom(n, 1, 0.3)
   )
 }
 
@@ -76,4 +78,18 @@ test_that("the hazard ratio is positive and finite", {
   res <- run_outcomes(matched, outcomes, out_dir = tmp_out)
   hr <- res$results$estimate[res$results$effect == "Hazard ratio"]
   expect_true(is.finite(hr) && hr > 0)
+})
+
+test_that("covariate adjustment runs and returns finite estimates", {
+  skip_if_not_installed("survival")
+  skip_if_not_installed("sandwich")
+  skip_if_not_installed("lmtest")
+
+  matched  <- make_matched()
+  outcomes <- make_synthetic_outcomes(matched)
+  tmp_out  <- file.path(tempdir(), paste0("o_", as.integer(runif(1, 1, 1e8))))
+  res <- run_outcomes(matched, outcomes, out_dir = tmp_out,
+                      adjust_vars = "prior_ipsi_revasc")
+  expect_true(all(is.finite(res$results$estimate)))
+  expect_gte(nrow(res$results), 6)
 })

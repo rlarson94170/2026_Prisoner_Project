@@ -12,6 +12,10 @@
 # standard errors on the matched sets (subclass), consistent with the SAP's
 # "estimates over p-values" framing.
 #
+# Pass adjust_vars to covariate-adjust the models for any residual imbalance the
+# match leaves behind (a doubly-robust design). Those covariates must be present
+# in the matched cohort; run_outcomes carries them through automatically.
+#
 # The outcomes file is de-identified: one row per study_id with day-count
 # intervals and event flags, never calendar dates. Use
 # build_outcomes_from_abstraction() to derive it from the abstraction workbook
@@ -90,14 +94,26 @@ build_outcomes_from_abstraction <- function(abstraction, crosswalk = NULL) {
 #   family = "gaussian"     -> risk / mean difference (identity link)
 #   family = "quasipoisson" -> risk ratio or rate ratio (log link, exponentiated)
 # ---------------------------------------------------------------------------
+# Only keep adjustment variables that are present and not constant.
+usable_adjust <- function(d, adjust) {
+  adj <- intersect(adjust, names(d))
+  adj[vapply(adj, function(v) {
+    length(unique(d[[v]][!is.na(d[[v]])])) > 1
+  }, logical(1))]
+}
+
 robust_effect <- function(d, outcome, label, effect,
-                          family = "gaussian", exponentiate = FALSE) {
+                          family = "gaussian", exponentiate = FALSE,
+                          adjust = character(0)) {
   d$.y   <- d[[outcome]]
   d$.grp <- as.integer(d$inmate == "Inmate")
+  adj <- usable_adjust(d, adjust)
   fam <- switch(family,
                 gaussian     = stats::gaussian(),
                 quasipoisson = stats::quasipoisson(link = "log"))
-  fit <- stats::glm(.y ~ .grp, data = d, weights = d$weights, family = fam)
+  rhs <- paste(c(".grp", adj), collapse = " + ")
+  fit <- stats::glm(stats::as.formula(paste(".y ~", rhs)),
+                    data = d, weights = d$weights, family = fam)
   V   <- sandwich::vcovCL(fit, cluster = d$subclass)
   ct  <- lmtest::coeftest(fit, vcov. = V)
   est <- ct[".grp", "Estimate"]; se <- ct[".grp", "Std. Error"]
@@ -110,12 +126,16 @@ robust_effect <- function(d, outcome, label, effect,
 # ---------------------------------------------------------------------------
 # Main entry point.
 # ---------------------------------------------------------------------------
-run_outcomes <- function(matched, outcomes, out_dir = here::here("output")) {
+run_outcomes <- function(matched, outcomes, out_dir = here::here("output"),
+                         adjust_vars = character(0)) {
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
-  keep <- c("study_id", "inmate", "weights", "subclass")
+  # Carry the adjustment covariates through from the matched cohort so the
+  # outcome models can covariate-adjust for residual imbalance (doubly robust).
+  keep <- c("study_id", "inmate", "weights", "subclass", adjust_vars)
   d <- matched[, intersect(keep, names(matched))] %>%
     dplyr::inner_join(outcomes, by = "study_id")
+  adj <- usable_adjust(d, adjust_vars)
 
   results <- list()
 
@@ -132,15 +152,17 @@ run_outcomes <- function(matched, outcomes, out_dir = here::here("output")) {
   )
   readr::write_csv(surv_1yr, file.path(out_dir, "survival_1yr.csv"))
 
+  cox_rhs <- paste(c("inmate", adj), collapse = " + ")
   cox <- survival::coxph(
-    survival::Surv(os_time, os_event) ~ inmate,
+    stats::as.formula(paste0("survival::Surv(os_time, os_event) ~ ", cox_rhs)),
     data = d, weights = weights, cluster = subclass, robust = TRUE
   )
-  ci <- summary(cox)$conf.int
+  ci  <- summary(cox)$conf.int
+  irow <- grep("^inmate", rownames(ci))[1]
   results[["survival"]] <- tibble::tibble(
     outcome = "Overall survival (1 yr and full follow-up)", effect = "Hazard ratio",
-    estimate = ci[1, "exp(coef)"],
-    conf.low = ci[1, "lower .95"], conf.high = ci[1, "upper .95"]
+    estimate = ci[irow, "exp(coef)"],
+    conf.low = ci[irow, "lower .95"], conf.high = ci[irow, "upper .95"]
   )
   save_km_plot(km, file.path(out_dir, "km_survival.png"))
 
@@ -160,35 +182,37 @@ run_outcomes <- function(matched, outcomes, out_dir = here::here("output")) {
   }))
   readr::write_csv(cif_1yr, file.path(out_dir, "male_cif_1yr.csv"))
 
-  d_fg <- d[, c("male_time", "male_fac", "inmate", "subclass", "weights")]
+  d_fg <- d[, c("male_time", "male_fac", "inmate", "subclass", "weights", adj)]
   fg <- survival::finegray(
     survival::Surv(male_time, male_fac) ~ ., data = d_fg, etype = "MALE"
   )
+  fg_rhs <- paste(c("inmate", adj), collapse = " + ")
   fgcox <- survival::coxph(
-    survival::Surv(fgstart, fgstop, fgstatus) ~ inmate,
+    stats::as.formula(paste0("survival::Surv(fgstart, fgstop, fgstatus) ~ ", fg_rhs)),
     data = fg, weights = fgwt * weights, cluster = subclass, robust = TRUE
   )
-  fci <- summary(fgcox)$conf.int
+  fci  <- summary(fgcox)$conf.int
+  frow <- grep("^inmate", rownames(fci))[1]
   results[["male"]] <- tibble::tibble(
     outcome = "MALE at 1 year (competing risk)", effect = "Subdistribution HR",
-    estimate = fci[1, "exp(coef)"],
-    conf.low = fci[1, "lower .95"], conf.high = fci[1, "upper .95"]
+    estimate = fci[frow, "exp(coef)"],
+    conf.low = fci[frow, "lower .95"], conf.high = fci[frow, "upper .95"]
   )
 
   ## ---- 3. Binary outcomes: readmission, smoking, adherence ----------------
   results[["readmit"]] <- robust_effect(
-    d, "readmit_1yr", "Readmission within 1 year", "Risk difference")
+    d, "readmit_1yr", "Readmission within 1 year", "Risk difference", adjust = adj)
   results[["smoke"]] <- robust_effect(
-    d, "current_smoker_fu", "Current smoking at follow-up", "Risk difference")
+    d, "current_smoker_fu", "Current smoking at follow-up", "Risk difference", adjust = adj)
   results[["statin"]] <- robust_effect(
-    d, "statin_adherent", "Statin adherence at follow-up", "Risk difference")
+    d, "statin_adherent", "Statin adherence at follow-up", "Risk difference", adjust = adj)
 
   ## ---- 4. Follow-up access ------------------------------------------------
   results[["days_fu"]] <- robust_effect(
-    d, "days_to_first_fu", "Days to first follow-up", "Mean difference (days)")
+    d, "days_to_first_fu", "Days to first follow-up", "Mean difference (days)", adjust = adj)
   results[["n_fu"]] <- robust_effect(
     d, "n_fu_visits_1yr", "Follow-up visits within 1 year", "Rate ratio",
-    family = "quasipoisson", exponentiate = TRUE)
+    family = "quasipoisson", exponentiate = TRUE, adjust = adj)
 
   ## ---- Assemble and write -------------------------------------------------
   results_tbl <- dplyr::bind_rows(results) %>%

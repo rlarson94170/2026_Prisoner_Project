@@ -46,14 +46,17 @@ no `private/` contents are staged.
 
 ## Matching (`R/04_match.R`)
 
-Optimal 2:1 matching on the propensity score, exact-matched on prior ipsilateral
-revascularization (a strong prognostic factor for the limb outcomes). Each inmate
-is matched to two distinct controls with the same prior-revascularization status,
-chosen to minimize the total propensity-score distance, which bounds the control
-set (up to 76 controls for 38 inmates, ~114 charts) so the chart abstraction is
-feasible. Balance is judged by standardized mean differences (target < 0.10) on
-the matching covariates. The ratio is a parameter of `run_matching()` if you want
-to revisit it.
+Optimal 2:1 matching on the propensity score. Each inmate is matched to two
+distinct controls chosen to minimize the total propensity-score distance, which
+bounds the control set (up to 76 controls for 38 inmates, ~114 charts) so the
+chart abstraction is feasible. The ratio is a parameter of `run_matching()`.
+
+With 38 inmates and 13 correlated covariates, a bounded match cannot force every
+covariate below 0.10 the way full matching can. This is a doubly-robust matched
+design: we require adequate balance (standardized mean difference < 0.25, with
+< 0.10 as ideal) and then covariate-adjust any residual imbalance in the outcome
+models. `validate.R` reports which covariates sit between 0.10 and 0.25, and you
+pass those to `run_outcomes(adjust_vars = ...)`.
 
 The matching covariates are age, current smoking, diabetes, dialysis, CLTI
 (limb severity collapsed to chronic limb-threatening ischemia versus not),

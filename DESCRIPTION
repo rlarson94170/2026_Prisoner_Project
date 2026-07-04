@@ -1,9 +1,9 @@
 Package: prisonerPadAnalysis
 Title: Endovascular PAD Outcomes in Incarcerated vs Non-Incarcerated Patients
 Version: 0.0.0.9000
-Authors@R:
+Authors@RAL:
     person("Study", "Team", role = c("aut", "cre"),
-           email = "study.team@example.org")
+           email = "robert.larson@vcuhealth.org")
 Description: Reproducible pipeline that builds a propensity-matched comparison
     group from the VQI PVI registry for a study of endovascular peripheral
     artery disease outcomes in incarcerated versus non-incarcerated patients.
