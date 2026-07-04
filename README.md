@@ -46,10 +46,14 @@ no `private/` contents are staged.
 
 ## Matching (`R/04_match.R`)
 
-Optimal full matching on the propensity score. Full matching uses every
-control, weighted into subclasses, which balances the covariate set better than
-fixed-ratio nearest neighbor in a small treated group. Balance is judged by
-standardized mean differences (target < 0.10) on the matching covariates.
+Optimal 2:1 matching on the propensity score, exact-matched on prior ipsilateral
+revascularization (a strong prognostic factor for the limb outcomes). Each inmate
+is matched to two distinct controls with the same prior-revascularization status,
+chosen to minimize the total propensity-score distance, which bounds the control
+set (up to 76 controls for 38 inmates, ~114 charts) so the chart abstraction is
+feasible. Balance is judged by standardized mean differences (target < 0.10) on
+the matching covariates. The ratio is a parameter of `run_matching()` if you want
+to revisit it.
 
 The matching covariates are age, current smoking, diabetes, dialysis, CLTI
 (limb severity collapsed to chronic limb-threatening ischemia versus not),
@@ -75,6 +79,48 @@ balance table and Table 1 for description only.
 
 Outputs (Table 1, Love plot, matched cohort) are written to the git-ignored
 `output/` folder.
+
+## Outcome analysis (`R/05_outcomes.R`)
+
+Placeholder until the chart abstraction is done. It takes the matched cohort and
+a de-identified outcomes file (one row per study ID, day-count intervals and
+event flags, no calendar dates) and produces the SAP comparisons: overall
+survival (Kaplan-Meier plus weighted Cox hazard ratio), MALE with death as a
+competing risk (cumulative incidence plus a Fine-Gray subdistribution hazard
+ratio), readmission, current smoking, and statin adherence as risk differences,
+and follow-up access as a mean difference in days and a visit rate ratio. Every
+estimate carries a 95% CI from cluster-robust standard errors on the matched
+sets.
+
+Run it against a generated synthetic outcomes file so the path is exercisable
+now:
+
+```r
+source("run_all.R")       # builds output/matched_cohort.rds
+source("run_outcomes.R")  # makes synthetic outcomes if none exist, then analyzes
+```
+
+`build_outcomes_from_abstraction()` in `R/05_outcomes.R` converts the completed
+abstraction workbook plus the private crosswalk into that de-identified outcomes
+file. When the real data is ready, point `outcomes_path` in `run_outcomes.R` at
+it and rerun.
+
+## Prefilled abstraction workbook
+
+`dev/make_abstraction_workbook.R` builds an Excel workbook preloaded with the
+matched patients so abstractors only fill in the chart-based fields. The known
+reference columns (study ID, MRN, index dates, presentation, any registry death
+date) are prefilled and shaded; the chart-based columns are blank with dropdowns.
+
+```r
+source("run_all.R")                       # builds the matched cohort + crosswalk
+source("dev/make_abstraction_workbook.R") # loads the functions
+generate_abstraction_workbook()           # writes the prefilled workbook
+```
+
+It writes `private/abstraction_workbook_prefilled.xlsx`. That file holds MRNs and
+dates, so it stays in the git-ignored `private/` folder and must never be
+committed. Requires the `openxlsx` package.
 
 ## Testing and validation
 
@@ -104,14 +150,17 @@ source("validate.R")
 config.example.R          # template; copy to config.R (git-ignored) and edit
 run_all.R                 # runs the whole pipeline in order
 validate.R                # runtime data-quality checks on the real cohort
+run_outcomes.R            # runs the outcome analysis on the matched cohort
 R/utils.R                 # shared, dependency-free helpers
 R/00_setup.R              # packages, config load
 R/01_import.R             # read the raw registry export
 R/02_recode.R             # decode VQI numeric codes to clinical variables
 R/03_cohort.R             # apply cohort rules, de-identify
 R/04_match.R              # propensity matching, balance, Table 1
+R/05_outcomes.R           # outcome analysis (survival, MALE, readmission, access)
+dev/                      # helper scripts (synthetic outcomes, prefilled workbook)
 tests/testthat.R          # unit-test runner
-tests/testthat/           # synthetic-data tests (recode, cohort, match, PHI)
+tests/testthat/           # synthetic-data tests (recode, cohort, match, PHI, outcomes)
 data/                     # git-ignored: place raw data here if you prefer
 output/                   # git-ignored: generated tables and figures
 private/                  # git-ignored: study-ID crosswalk

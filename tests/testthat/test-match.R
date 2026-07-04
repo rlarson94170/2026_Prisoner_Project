@@ -49,20 +49,22 @@ make_analytic <- function(n_inmate = 15, n_ctrl = 150, seed = 1) {
     )
 }
 
-test_that("full matching retains all inmates and reuses no control", {
+test_that("optimal 2:1 matching keeps all inmates and 2 distinct controls each", {
   skip_if_not_installed("MatchIt")
   skip_if_not_installed("optmatch")
   skip_if_not_installed("cobalt")
 
   analytic <- make_analytic()
-  tmp_out <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))
-  res <- run_matching(analytic, out_dir = tmp_out)
+  n_inm    <- sum(analytic$inmate == "Inmate")
+  tmp_out  <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))
+  res <- run_matching(analytic, ratio = 2, out_dir = tmp_out)
   m <- res$matched
 
-  # Full matching keeps every treated unit.
-  expect_equal(sum(m$inmate == "Inmate"), sum(analytic$inmate == "Inmate"))
-  # Each control sits in exactly one subclass, so IDs stay unique.
+  # Every inmate is retained.
+  expect_equal(sum(m$inmate == "Inmate"), n_inm)
+  # Exactly two distinct controls per inmate (donor pool is large enough).
   ctl_ids <- m$study_id[m$inmate == "Non-inmate"]
+  expect_equal(length(ctl_ids), 2 * n_inm)
   expect_equal(anyDuplicated(ctl_ids), 0L)
 })
 

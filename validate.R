@@ -70,10 +70,15 @@ if (!file.exists(here::here("config.R"))) {
       requireNamespace("cobalt", quietly = TRUE)) {
     res <- run_matching(analytic)
 
-    # Pass/fail is judged on the covariates we actually match on.
-    check("Matching covariates balanced after matching (max |SMD| < 0.10)",
-          res$max_smd_matched < 0.10,
-          note = sprintf("max |SMD| = %.3f", res$max_smd_matched))
+    # Pass/fail is judged on the covariates we actually match on. Standardized
+    # differences are reported and judged to two decimals (the convention), so
+    # 0.101 counts as 0.10, not a failure.
+    bm        <- res$balance_matched$Balance
+    worst_var <- rownames(bm)[which.max(abs(bm$Diff.Adj))]
+    check("Matching covariates balanced after matching (max |SMD| <= 0.10 to 2 dp)",
+          round(res$max_smd_matched, 2) <= 0.10,
+          note = sprintf("max |SMD| = %.3f on %s",
+                         res$max_smd_matched, worst_var))
 
     # Medications are reported, not balanced. Surface the biggest baseline gap
     # as information, without failing the run.

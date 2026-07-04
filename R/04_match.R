@@ -15,10 +15,12 @@
 # table for description, but they do not enter the matching model and do not
 # count toward the balance target.
 #
-# Method: optimal full matching (uses every control, weighted into subclasses),
-# which balances this many covariates better than fixed-ratio nearest neighbor
-# in a small treated group. Balance and the weighted group means are produced
-# with cobalt, which applies the full-matching weights correctly.
+# Method: optimal 2:1 matching, exact-matched on prior ipsilateral
+# revascularization (a strong prognostic factor for the limb outcomes). Each
+# inmate is matched to two distinct controls with the same prior-revascularization
+# status, chosen to minimize the total propensity-score distance. The 2:1 ratio
+# keeps the control set bounded (up to 76 distinct controls) so the chart
+# abstraction is feasible. Balance and group means are produced with cobalt.
 # ---------------------------------------------------------------------------
 
 match_variables <- c(
@@ -33,7 +35,7 @@ report_variables <- c(
   "hypertension", "prior_amputation", "limb_severity"
 )
 
-run_matching <- function(analytic, out_dir = here::here("output")) {
+run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
 
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -46,8 +48,10 @@ run_matching <- function(analytic, out_dir = here::here("output")) {
   m.out <- MatchIt::matchit(
     fml,
     data     = dat,
-    method   = "full",   # optimal full matching (needs the optmatch package)
-    distance = "glm",    # logistic propensity score
+    method   = "optimal",  # optimal fixed-ratio matching (needs optmatch)
+    distance = "glm",      # logistic propensity score
+    ratio    = ratio,      # controls per inmate (2 -> up to 76 controls)
+    exact    = ~ prior_ipsi_revasc,  # force exact balance on this prognostic factor
     estimand = "ATT"
   )
 
@@ -60,7 +64,7 @@ run_matching <- function(analytic, out_dir = here::here("output")) {
   max_smd_matched <- max(abs(bal_match$Balance$Diff.Adj), na.rm = TRUE)
 
   # ---- Full balance table + weighted group means (serves as Table 1) --------
-  # cobalt applies the full-matching weights; disp = "means" adds the weighted
+  # cobalt applies the matching weights; disp = "means" adds the weighted
   # group means alongside the standardized differences.
   bal_full <- cobalt::bal.tab(
     m.out,
@@ -93,7 +97,7 @@ run_matching <- function(analytic, out_dir = here::here("output")) {
 
   saveRDS(matched, file.path(out_dir, "matched_cohort.rds"))
 
-  message("04_match.R: full matching retained ",
+  message("04_match.R: optimal ", ratio, ":1 matching retained ",
           sum(matched$inmate == "Inmate"), " inmates and ",
           sum(matched$inmate == "Non-inmate"), " controls. ",
           "Max |SMD| on matching covariates: ", round(max_smd_matched, 3), ".")

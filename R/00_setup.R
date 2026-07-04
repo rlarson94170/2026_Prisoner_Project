@@ -12,7 +12,7 @@ suppressPackageStartupMessages({
   library(readxl)      # read the .xlsx export
   library(janitor)     # clean_names(), tabyl()
   library(MatchIt)     # propensity score matching
-  library(optmatch)    # optimal full matching engine
+  library(optmatch)    # optimal matching engine
   library(cobalt)      # balance tables, weighted means, Love plots
   library(here)        # project-root-relative paths
 })
