@@ -33,6 +33,12 @@ test_that("the example config ships a placeholder path, not a real one", {
   cfg <- readLines(file.path("..", "..", "config.example.R"), warn = FALSE)
   path_line <- grep("RAW_DATA_PATH", cfg, value = TRUE)
   expect_true(any(grepl("/absolute/path/to/", path_line)))
-  # No committed config.R (it must stay local and git-ignored).
-  expect_false(file.exists(file.path("..", "..", "config.R")))
+})
+
+test_that("a local config.R, if present, is git-ignored", {
+  # config.R holds the real data path and is expected to exist locally once set
+  # up. What matters is that it can never be committed, so it must be listed in
+  # .gitignore rather than being absent.
+  gi <- readLines(file.path("..", "..", ".gitignore"), warn = FALSE)
+  expect_true(any(trimws(gi) == "config.R"))
 })

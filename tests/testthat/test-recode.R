@@ -24,14 +24,15 @@ test_that("comorbidity composites decode correctly", {
     make_proc("B", "2019-01-01", Diabetes = "0", CHF = "1", COPD = "1",
               Dialysis = "1", Hypertension = "0", Smoking = "1", CAD = "0")
   )
+  # recode_registry returns logical flags; they become 0/1 later in build_cohort.
   rc <- recode_registry(raw)
-  expect_equal(rc$diabetes_any,     c(1L, 0L))
-  expect_equal(rc$diabetes_insulin, c(1L, 0L))
-  expect_equal(rc$chf_symptomatic,  c(1L, 0L))   # code 1 = asymptomatic hx -> FALSE
-  expect_equal(rc$copd_treated,     c(1L, 0L))   # code 1 = not treated -> FALSE
-  expect_equal(rc$dialysis,         c(1L, 0L))   # only code 2 counts
-  expect_equal(rc$hypertension,     c(1L, 0L))
-  expect_equal(rc$current_smoker,   c(1L, 0L))   # only code 2 = current
+  expect_equal(rc$diabetes_any,     c(TRUE, FALSE))
+  expect_equal(rc$diabetes_insulin, c(TRUE, FALSE))
+  expect_equal(rc$chf_symptomatic,  c(TRUE, FALSE))  # code 1 = asymptomatic hx -> FALSE
+  expect_equal(rc$copd_treated,     c(TRUE, FALSE))  # code 1 = not treated -> FALSE
+  expect_equal(rc$dialysis,         c(TRUE, FALSE))  # only code 2 counts
+  expect_equal(rc$hypertension,     c(TRUE, FALSE))
+  expect_equal(rc$current_smoker,   c(TRUE, FALSE))  # only code 2 = current
 })
 
 test_that("coronary disease is a composite of CAD, prior CABG, prior PCI", {
@@ -41,7 +42,7 @@ test_that("coronary disease is a composite of CAD, prior CABG, prior PCI", {
     make_proc("C", "2019-01-01", CAD = "0", `Prior CABG` = "0", `Prior PCI` = "0")
   )
   rc <- recode_registry(raw)
-  expect_equal(rc$coronary_disease, c(1L, 1L, 0L))
+  expect_equal(rc$coronary_disease, c(TRUE, TRUE, FALSE))
 })
 
 test_that("antiplatelet is aspirin OR a listed P2Y12/PAR1 agent, not medical-reason codes", {
@@ -52,7 +53,7 @@ test_that("antiplatelet is aspirin OR a listed P2Y12/PAR1 agent, not medical-rea
     make_proc("D", "2019-01-01", `Pre-op ASA` = "0", `Pre-op Antiplatelet Drugs` = "0")   # none
   )
   rc <- recode_registry(raw)
-  expect_equal(rc$antiplatelet, c(1L, 1L, 0L, 0L))
+  expect_equal(rc$antiplatelet, c(TRUE, TRUE, FALSE, FALSE))
 })
 
 test_that("hybrid flag fires on any concomitant bypass field", {
