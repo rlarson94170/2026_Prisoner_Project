@@ -1,4 +1,22 @@
-.Rproj.user
+# Local configuration (points to the raw data on your machine)
+config.R
+
+# Never commit patient data or anything derived that could contain PHI
+data/
+output/
+private/
+*.xlsx
+*.xls
+*.csv
+*.rds
+*.RData
+
+# R session cruft
 .Rhistory
-.RData
-.Ruserdata
+.Rproj.user/
+.Rapp.history
+*.Rproj
+
+# OS cruft
+.DS_Store
+Thumbs.db
