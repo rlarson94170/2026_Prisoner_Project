@@ -1,6 +1,5 @@
-# Tests for the matching step in 04_match.R. These need MatchIt, optmatch,
-# cobalt, and (for a weighted Table 1) survey; the suite skips cleanly if any
-# are missing.
+# Tests for the matching step in 04_match.R. These need MatchIt, optmatch, and
+# cobalt; the suite skips cleanly if any are missing.
 
 make_analytic <- function(n_inmate = 15, n_ctrl = 150, seed = 1) {
   set.seed(seed)
@@ -85,7 +84,6 @@ test_that("matching writes all expected output files", {
   skip_if_not_installed("MatchIt")
   skip_if_not_installed("optmatch")
   skip_if_not_installed("cobalt")
-  skip_if_not_installed("tableone")
 
   analytic <- make_analytic()
   tmp_out <- file.path(tempdir(), paste0("m_", as.integer(runif(1, 1, 1e8))))

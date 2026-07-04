@@ -24,8 +24,6 @@ Imports:
     MatchIt,
     optmatch,
     cobalt,
-    tableone,
-    survey,
     here
 Suggests:
     testthat (>= 3.0.0)

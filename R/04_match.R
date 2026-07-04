@@ -12,12 +12,13 @@
 # ACE/ARB, antiplatelets, and insulin in inmates is part of the incarceration
 # effect we're studying (supervised administration), so those are reported as
 # baseline differences rather than balanced away. They appear in the balance
-# table and Table 1 for description, but they do not enter the matching model
-# and do not count toward the balance target.
+# table for description, but they do not enter the matching model and do not
+# count toward the balance target.
 #
 # Method: optimal full matching (uses every control, weighted into subclasses),
 # which balances this many covariates better than fixed-ratio nearest neighbor
-# in a small treated group.
+# in a small treated group. Balance and the weighted group means are produced
+# with cobalt, which applies the full-matching weights correctly.
 # ---------------------------------------------------------------------------
 
 match_variables <- c(
@@ -58,15 +59,23 @@ run_matching <- function(analytic, out_dir = here::here("output")) {
   )
   max_smd_matched <- max(abs(bal_match$Balance$Diff.Adj), na.rm = TRUE)
 
-  # ---- Full balance table, including the reported-only variables ------------
+  # ---- Full balance table + weighted group means (serves as Table 1) --------
+  # cobalt applies the full-matching weights; disp = "means" adds the weighted
+  # group means alongside the standardized differences.
   bal_full <- cobalt::bal.tab(
     m.out,
     addl       = dat[, report_variables, drop = FALSE],
     un         = TRUE,
+    disp       = c("means"),
     binary     = "std",
     continuous = "std"
   )
   capture.output(print(bal_full), file = file.path(out_dir, "balance_table.txt"))
+
+  # Weighted Table 1: variable, weighted mean per group, and SMD.
+  t1 <- bal_full$Balance
+  t1$Variable <- rownames(t1)
+  utils::write.csv(t1, file.path(out_dir, "table1_matched.csv"), row.names = FALSE)
 
   love <- cobalt::love.plot(
     m.out,
@@ -81,27 +90,6 @@ run_matching <- function(analytic, out_dir = here::here("output")) {
   )
   ggplot2::ggsave(file.path(out_dir, "love_plot.png"),
                   love, width = 8, height = 7, dpi = 200)
-
-  # ---- Weighted Table 1 (full matching implies weights) --------------------
-  all_vars    <- c(match_variables, report_variables)
-  factor_vars <- all_vars[
-    vapply(matched[all_vars], function(x) is.factor(x) || is.character(x), logical(1))
-  ]
-  if (requireNamespace("survey", quietly = TRUE)) {
-    dsn <- survey::svydesign(ids = ~1, weights = ~weights, data = matched)
-    t1  <- tableone::svyCreateTableOne(
-      vars = all_vars, strata = "inmate", factorVars = factor_vars,
-      data = dsn, test = FALSE
-    )
-  } else {
-    warning("survey not installed; Table 1 is unweighted.", call. = FALSE)
-    t1 <- tableone::CreateTableOne(
-      vars = all_vars, strata = "inmate", factorVars = factor_vars,
-      data = matched, test = FALSE
-    )
-  }
-  t1_out <- print(t1, smd = TRUE, printToggle = FALSE, noSpaces = TRUE)
-  utils::write.csv(t1_out, file.path(out_dir, "table1_matched.csv"))
 
   saveRDS(matched, file.path(out_dir, "matched_cohort.rds"))
 
