@@ -1,0 +1,52 @@
+# ---------------------------------------------------------------------------
+# dev/make_redcap_import.R
+# Exports the matched cohort's reference fields as a REDCap data-import CSV, so
+# the prefilled columns (study ID, MRN, inmate, index dates, presentation) are
+# loaded into REDCap and abstractors only fill in the chart-based fields.
+#
+# Import it in REDCap via: Data Import Tool -> choose CSV -> upload.
+#
+# This file contains MRNs and dates, so it is written to the git-ignored
+# private/ folder and must never be committed.
+#
+# After sourcing:
+#   source("dev/make_redcap_import.R")
+#   generate_redcap_import()
+# ---------------------------------------------------------------------------
+
+build_redcap_import <- function(matched, crosswalk) {
+  ref <- dplyr::left_join(
+    dplyr::select(matched, dplyr::any_of(c("study_id", "inmate", "presentation"))),
+    crosswalk, by = "study_id"
+  )
+  ymd <- function(d) ifelse(is.na(d), "", format(as.Date(d), "%Y-%m-%d"))
+
+  tibble::tibble(
+    study_id         = ref$study_id,
+    mrn              = as.character(ref$mrn),
+    inmate           = as.integer(ref$inmate == "Inmate"),                 # 1 / 0
+    index_admit_date = ymd(ref$admit_date),
+    index_proc_date  = ymd(ref$procedure_date),
+    index_dc_date    = ymd(ref$discharge_date),
+    presentation     = ifelse(as.character(ref$presentation) == "CLTI", 2L, 1L)
+  )
+}
+
+generate_redcap_import <- function(
+    matched_path   = here::here("output",  "matched_cohort.rds"),
+    crosswalk_path = here::here("private", "id_crosswalk.rds"),
+    out_path       = here::here("private", "redcap_import.csv")) {
+
+  if (!file.exists(matched_path) || !file.exists(crosswalk_path)) {
+    stop("Need output/matched_cohort.rds and private/id_crosswalk.rds. ",
+         "Run run_all.R first.", call. = FALSE)
+  }
+  imp <- build_redcap_import(readRDS(matched_path), readRDS(crosswalk_path))
+  dir.create(dirname(out_path), showWarnings = FALSE, recursive = TRUE)
+  readr::write_csv(imp, out_path, na = "")
+  message("Wrote ", out_path, " (", nrow(imp),
+          " records; keep this file off GitHub).")
+  invisible(out_path)
+}
+
+if (sys.nframe() == 0) generate_redcap_import()

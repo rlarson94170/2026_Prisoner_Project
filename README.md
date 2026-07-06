@@ -125,6 +125,33 @@ It writes `private/abstraction_workbook_prefilled.xlsx`. That file holds MRNs an
 dates, so it stays in the git-ignored `private/` folder and must never be
 committed. Requires the `openxlsx` package.
 
+## REDCap abstraction (alternative to the Excel workbook)
+
+For institutions that use REDCap, the abstraction can be entered on a single
+validated web form instead of a spreadsheet. Files live in `redcap/`.
+
+- `REDCap_Outcome_Abstraction_Project.xml` — upload at project creation ("Upload
+  a REDCap project XML file"). Builds the whole instrument: 48 fields in 8
+  sections, date and integer validation, dropdowns and yes/no fields, 16
+  branching-logic rules (e.g. a death date only appears when vital status is
+  dead), required fields, the MRN flagged as an identifier, and the prefilled
+  reference fields marked `@READONLY`.
+- `REDCap_Outcome_Abstraction_DataDictionary.csv` — the same instrument as a
+  REDCap Data Dictionary. If the XML ever hiccups on your REDCap version, create
+  an empty project and upload this under Designer -> Data Dictionary instead.
+
+Neither file contains PHI. Test-import into a scratch project first to confirm
+it renders the way you want.
+
+To preload the matched patients so abstractors only fill chart-based fields:
+
+```r
+source("dev/make_redcap_import.R")
+generate_redcap_import()   # writes private/redcap_import.csv (MRNs -> keep off GitHub)
+```
+
+Then in REDCap use the Data Import Tool to upload `private/redcap_import.csv`.
+
 ## Testing and validation
 
 Two independent layers.
@@ -161,7 +188,8 @@ R/02_recode.R             # decode VQI numeric codes to clinical variables
 R/03_cohort.R             # apply cohort rules, de-identify
 R/04_match.R              # propensity matching, balance, Table 1
 R/05_outcomes.R           # outcome analysis (survival, MALE, readmission, access)
-dev/                      # helper scripts (synthetic outcomes, prefilled workbook)
+dev/                      # helper scripts (synthetic outcomes, prefilled workbook, REDCap import)
+redcap/                   # REDCap project XML + data dictionary (no PHI)
 tests/testthat.R          # unit-test runner
 tests/testthat/           # synthetic-data tests (recode, cohort, match, PHI, outcomes)
 data/                     # git-ignored: place raw data here if you prefer

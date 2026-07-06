@@ -20,3 +20,7 @@ private/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# REDCap templates are field definitions only (no PHI) — keep them tracked
+!redcap/*.csv
+!redcap/*.xml
