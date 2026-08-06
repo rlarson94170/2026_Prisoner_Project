@@ -259,8 +259,15 @@ link_v1_abstraction <- function(
 # Free-text digest of a v1 record. Shared by both carry-over paths below.
 .v1_digest <- function(d) {
   fmt <- function(x) ifelse(is.na(x), "none", format(x, "%m/%d/%Y"))
+  vital <- ifelse(
+    !is.na(d$v1_death_date),
+    paste0("dead ", fmt(d$v1_death_date)),
+    ifelse(is.na(d$v1_last_fu_date),
+           "NOT ESTABLISHED - no death record and no follow-up contact in 2020",
+           paste0("alive as of ", fmt(d$v1_last_fu_date))))
   paste0(
-    "v1 reint: ", ifelse(d$v1_reint_any, "Y", "N"),
+    "v1 vital status: ", vital,
+    " | v1 reint: ", ifelse(d$v1_reint_any, "Y", "N"),
     " (n=", d$v1_n_reint, "; ", fmt(d$v1_reint1_date), ", ",
     fmt(d$v1_reint2_date), ")",
     " | v1 amp: ", ifelse(d$v1_amp_any, "Y", "N"),
@@ -296,16 +303,35 @@ prefill_from_v1 <- function(link, workbook_df) {
   # records - one stray click on Erase and the carry-over was gone. Their values
   # now travel in v1_source_text instead, where they inform without asserting.
   same <- dplyr::filter(link, .data$v1_status == "reusable_same_index")
+
+  # "Alive" is only asserted where the 2020 record actually documents contact.
+  # A patient with no death record AND no follow-up visit is not evidence of
+  # survival, just absence of evidence - and survival is a primary outcome here,
+  # so guessing it into an answer cell is the wrong default. Those records get
+  # a blank vital_status and the reason in v1_source_text. Leaving it blank also
+  # keeps death_date and last_alive_date correctly hidden, since both branch on
+  # vital_status, and both are empty for these patients anyway.
+  vital <- ifelse(
+    is.na(same$v1_death_date) & is.na(same$v1_last_fu_date), NA_character_,
+    ifelse(is.na(same$v1_death_date), "alive", "dead"))
+
   reusable <- tibble::tibble(
     study_id           = same$study_id,
-    vital_status       = ifelse(is.na(same$v1_death_date), "alive", "dead"),
+    vital_status       = vital,
     death_date         = format(same$v1_death_date, "%m/%d/%Y"),
     last_alive_date    = format(same$v1_last_fu_date, "%m/%d/%Y"),
     first_fu_date      = format(same$v1_first_fu_date, "%m/%d/%Y"),
     days_to_first_fu   = as.character(same$v1_days_to_first_fu),
-    v1_source_text     = .v1_digest(same),
-    v1_reused          = 1L
+    v1_source_text     = .v1_digest(same)
   )
+
+  # v1_reused means "an answer cell was prefilled", so derive it rather than
+  # asserting it: a record whose 2020 row was entirely empty gets the reference
+  # note but no carry-over flag.
+  answer_cols <- c("vital_status", "death_date", "last_alive_date",
+                   "first_fu_date", "days_to_first_fu")
+  reusable$v1_reused <- as.integer(
+    rowSums(!is.na(reusable[, answer_cols, drop = FALSE])) > 0)
 
   # ---- Same patient, DIFFERENT index procedure -----------------------------
   # Time zero differs, so nothing can be copied: every interval in the 2020
