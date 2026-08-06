@@ -70,11 +70,15 @@ recode_registry <- function(raw) {
       ),
       urgency = dplyr::if_else(as_code(.data[["Urgency"]]) == "1",
                                "Elective", "Urgent/Emergent"),
+      # A missing ambulation code is missing data, not a category. Coding it as
+      # "Unknown" smuggled it past the covariate-completeness filter in
+      # 03_cohort.R and then into the propensity model as a real level, where
+      # it caused separation (no inmate had an unknown ambulation).
       ambulation = dplyr::case_when(
         as_code(.data[["Ambulation"]]) == "1"            ~ "Ambulatory",
         as_code(.data[["Ambulation"]]) %in% c("2","5","6") ~ "Assisted",
         as_code(.data[["Ambulation"]]) %in% c("3","4")   ~ "Non-ambulatory",
-        TRUE                                             ~ "Unknown"
+        TRUE                                             ~ NA_character_
       ),
       coronary_disease = is_present(.data[["CAD"]]) |
                          is_present(.data[["Prior CABG"]]) |

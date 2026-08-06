@@ -133,10 +133,36 @@ if (!file.exists(here::here("config.R"))) {
     }
   }
 
+  # --- Common support ------------------------------------------------------
+  # Controls occupying a covariate level no inmate occupies are unmatchable and
+  # make the propensity model separate ("fitted probabilities numerically 0 or
+  # 1"). 03_cohort.R trims them; this confirms none survived.
+  sup <- cohort$support
+  if (!is.null(sup) && nrow(sup)) {
+    message(sprintf("Note: common support dropped %d control(s) across %d level(s): %s.",
+                    sum(sup$controls_dropped), nrow(sup),
+                    paste(sprintf("%s=%s", sup$variable, sup$level), collapse = ", ")))
+  }
+
+  offenders <- character()
+  for (v in intersect(SUPPORT_VARS, names(analytic))) {
+    lv <- as.character(analytic[[v]])
+    inm <- unique(lv[analytic$inmate == "Inmate" & !is.na(lv)])
+    ctl <- unique(lv[analytic$inmate == "Non-inmate" & !is.na(lv)])
+    if (length(setdiff(ctl, inm))) {
+      offenders <- c(offenders, sprintf("%s=%s", v,
+                                        paste(setdiff(ctl, inm), collapse = "/")))
+    }
+  }
+  check("No control-only covariate levels remain (propensity model is estimable)",
+        length(offenders) == 0,
+        note = if (length(offenders)) paste(offenders, collapse = "; ")
+               else "all covariate levels contain inmates")
+
   # --- Matching diagnostics ------------------------------------------------
   if (requireNamespace("MatchIt", quietly = TRUE) &&
       requireNamespace("cobalt", quietly = TRUE)) {
-    res <- run_matching(analytic)
+    res <- run_matching(analytic, drop_vars = cohort$degenerate_vars)
 
     # Doubly-robust matched design. We require adequate balance (|SMD| < 0.25,
     # the conventional bar) and treat < 0.10 as ideal. Any covariate left

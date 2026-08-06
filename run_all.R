@@ -17,7 +17,7 @@ source(here::here("R", "04_match.R"))
 raw      <- import_raw()
 proc     <- recode_registry(raw)
 cohort   <- build_cohort(proc)
-result   <- run_matching(cohort$analytic)
+result   <- run_matching(cohort$analytic, drop_vars = cohort$degenerate_vars)
 
 message("\nPipeline complete.")
 message("Cohort flow:")

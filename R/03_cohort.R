@@ -48,6 +48,14 @@
 MIN_AGE  <- 18    # eligibility floor
 MAX_AGE  <- 110   # implausibility ceiling (reported, not filtered)
 
+# Categorical / binary matching covariates checked for common support. A level
+# containing controls but no inmates is a region the treated group never
+# occupies: those controls are unmatchable, and leaving them in makes the
+# propensity model separate ("fitted probabilities numerically 0 or 1").
+SUPPORT_VARS <- c("dialysis", "race", "ambulation", "urgency", "clti",
+                  "current_smoker", "diabetes_any", "coronary_disease",
+                  "chf_symptomatic", "copd_treated", "prior_ipsi_revasc")
+
 # Registry MRNs sometimes carry a leading zero ("04221952") while other sources
 # store them as numbers. Normalise before any MRN comparison or join.
 norm_mrn <- function(x) sub("^0+", "", trimws(as.character(x)))
@@ -236,6 +244,68 @@ assign_study_ids <- function(mrn, registry_path) {
 }
 
 # ---------------------------------------------------------------------------
+# Common support
+#
+# Drops CONTROLS occupying a covariate level that contains no inmates. Inmates
+# are never dropped: the estimand is the ATT, so the treated group defines the
+# population and the control pool has to be restricted to match it, not the
+# other way round.
+#
+# This is what removes the "glm.fit: fitted probabilities numerically 0 or 1"
+# warning. A level with controls but no inmates is perfectly predictive of
+# non-inmate status, which drives its coefficient to -Inf.
+#
+# Returns the trimmed data with attributes "support_log" (what was dropped) and
+# "degenerate_vars" (covariates left with no variation, which 04_match.R then
+# drops from the model).
+# ---------------------------------------------------------------------------
+apply_common_support <- function(index, support_vars = SUPPORT_VARS) {
+
+  present <- intersect(support_vars, names(index))
+  drop <- rep(FALSE, nrow(index))
+  log <- tibble::tibble(variable = character(), level = character(),
+                        controls_dropped = integer())
+
+  for (v in present) {
+    lv <- as.character(index[[v]])
+    inmate_levels <- unique(lv[index$inmate == 1 & !is.na(lv)])
+    offending <- setdiff(unique(lv[!is.na(lv)]), inmate_levels)
+    for (o in offending) {
+      hit <- index$inmate == 0 & !is.na(lv) & lv == o
+      if (any(hit)) {
+        drop <- drop | hit
+        log <- dplyr::bind_rows(log, tibble::tibble(
+          variable = v, level = o, controls_dropped = sum(hit)
+        ))
+      }
+    }
+  }
+
+  out <- index[!drop, , drop = FALSE]
+
+  # Covariates with no remaining variation cannot enter the propensity model.
+  degenerate <- present[vapply(present, function(v) {
+    length(unique(as.character(out[[v]][!is.na(out[[v]])]))) < 2L
+  }, logical(1))]
+
+  if (nrow(log)) {
+    message("03_cohort.R: common support dropped ", sum(drop),
+            " control(s) in ", nrow(log), " covariate level(s) with no inmates: ",
+            paste(sprintf("%s=%s (n=%d)", log$variable, log$level,
+                          log$controls_dropped), collapse = ", "), ".")
+  }
+  if (length(degenerate)) {
+    message("03_cohort.R: covariate(s) with no remaining variation, to be ",
+            "dropped from the propensity model: ",
+            paste(degenerate, collapse = ", "), ".")
+  }
+
+  attr(out, "support_log")     <- log
+  attr(out, "degenerate_vars") <- degenerate
+  out
+}
+
+# ---------------------------------------------------------------------------
 
 build_cohort <- function(proc,
                          out_dir          = here::here("output"),
@@ -324,10 +394,23 @@ build_cohort <- function(proc,
     dplyr::slice(1L) %>%
     dplyr::ungroup()
 
-  # Require the covariates used for matching to be present.
+  # Require the covariates used for matching to be present. Ambulation is
+  # included explicitly: a missing ambulation code is missing data, and 02_recode
+  # now returns NA for it rather than an "Unknown" category.
   index <- index %>%
-    dplyr::filter(!is.na(.data$age), !is.na(.data$limb_severity))
+    dplyr::filter(!is.na(.data$age), !is.na(.data$limb_severity),
+                  !is.na(.data$ambulation), !is.na(.data$bmi),
+                  !is.na(.data$race), !is.na(.data$urgency))
   n_index <- nrow(index)
+
+  # Restrict the control pool to the region of common support.
+  index           <- apply_common_support(index)
+  support_log     <- attr(index, "support_log")
+  degenerate_vars <- attr(index, "degenerate_vars")
+  n_support       <- nrow(index)
+  if (!is.null(support_log) && nrow(support_log)) {
+    readr::write_csv(support_log, file.path(out_dir, "common_support.csv"))
+  }
 
   # ---- De-identify --------------------------------------------------------
   # Study IDs come from the persisted registry, so a given MRN keeps its PID
@@ -371,8 +454,10 @@ build_cohort <- function(proc,
              paste0("After excluding age < ", min_age),
              "After dropping crossover non-inmate admissions",
              "Distinct admissions (first procedure each)",
-             "Index admissions (one per patient, covariates present)"),
-    n = c(n0, n_male, n_endo, n_adult, n_after_crossover, n_admissions, n_index)
+             "Index admissions (one per patient, covariates present)",
+             "After restricting controls to the region of common support"),
+    n = c(n0, n_male, n_endo, n_adult, n_after_crossover, n_admissions,
+          n_index, n_support)
   )
   readr::write_csv(flow, file.path(out_dir, "cohort_flow.csv"))
 
@@ -380,5 +465,9 @@ build_cohort <- function(proc,
           " (inmate = ", sum(analytic$inmate == "Inmate"),
           ", non-inmate = ", sum(analytic$inmate == "Non-inmate"), ").")
 
-  list(analytic = analytic, flow = flow, updates = updates_log)
+  list(analytic        = analytic,
+       flow            = flow,
+       updates         = updates_log,
+       support         = support_log,
+       degenerate_vars = degenerate_vars)
 }

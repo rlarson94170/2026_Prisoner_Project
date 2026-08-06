@@ -4,20 +4,20 @@
 build_test_cohort <- function() {
   raw <- make_raw(
     # Inmate, male, two inmate admissions -> index is the earlier one.
-    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "5"),
-    make_proc("INM1", "2019-01-10", inmate = "1", sev_r = "5"),
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10"),
+    make_proc("INM1", "2019-01-10", inmate = "1", sev_r = "10"),
     # Plain non-inmate male control.
     make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10"),
     # Crossover: a non-inmate admission and a later inmate admission.
     make_proc("CROSS", "2017-01-05", inmate = "0", sev_r = "10"),
-    make_proc("CROSS", "2018-03-05", inmate = "1", sev_r = "4"),
+    make_proc("CROSS", "2018-03-05", inmate = "1", sev_r = "10"),
     # Female -> excluded entirely.
-    make_proc("FEM", "2019-01-01", inmate = "1", sex = "2", sev_r = "5"),
+    make_proc("FEM", "2019-01-01", inmate = "1", sex = "2", sev_r = "10"),
     # Non-inmate male whose only admission is hybrid -> excluded.
     make_proc("HYB", "2019-02-01", inmate = "0", hybrid = TRUE, sev_r = "10"),
     # Inmate, one admission, two staged procedures same admit date -> collapse.
-    make_proc("STAGED", "2020-02-02", proc = "2020-02-02", inmate = "1", sev_r = "5"),
-    make_proc("STAGED", "2020-02-02", proc = "2020-02-04", inmate = "1", sev_r = "5"),
+    make_proc("STAGED", "2020-02-02", proc = "2020-02-02", inmate = "1", sev_r = "10"),
+    make_proc("STAGED", "2020-02-02", proc = "2020-02-04", inmate = "1", sev_r = "10"),
     # Non-inmate male with no evaluable limb severity -> excluded.
     make_proc("NOSEV", "2019-03-01", inmate = "0", sev_r = "11", sev_l = "11"),
     # Non-inmate male: earliest admission hybrid (dropped), later clean one is index.
@@ -46,8 +46,9 @@ test_that("cohort size and group counts follow the rules", {
 test_that("females, hybrid-only, and under-age patients are excluded", {
   co <- build_test_cohort()
   # 5 retained; FEM, HYB, NOSEV, BABY, TEEN are gone. Confirm via flow counts.
-  expect_equal(co$flow$n, c(14L, 13L, 11L, 9L, 8L, 7L, 5L))
+  expect_equal(co$flow$n, c(14L, 13L, 11L, 9L, 8L, 7L, 5L, 5L))
   expect_match(co$flow$step[4], "age < 18")
+  expect_match(co$flow$step[8], "common support")
   expect_false(any(co$analytic$age < 18))
 })
 
@@ -101,7 +102,7 @@ test_that("inmate is a factor with non-inmate as the reference level", {
 # the Patient Updates.xlsx column style.
 build_with_updates <- function(upd) {
   raw <- make_raw(
-    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "5"),
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10"),
     make_proc("MISSED", "2016-01-12", inmate = "0", sev_r = "10"),
     make_proc("MISSED", "2019-05-01", inmate = "0", sev_r = "10"),
     make_proc("BADAGE", "2017-01-16", inmate = "0", age = 0, sev_r = "10"),
@@ -186,7 +187,7 @@ test_that("an update for an MRN absent from the export warns and is logged", {
 
 test_that("no updates file is a no-op", {
   raw <- make_raw(
-    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "5"),
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10"),
     make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10")
   )
   proc <- recode_registry(raw)
@@ -209,7 +210,7 @@ test_that("an MRN keeps its study ID when the cohort grows", {
 
   base_rows <- list(
     make_proc("AAA1", "2018-01-10", inmate = "0", sev_r = "10"),
-    make_proc("CCC3", "2018-02-10", inmate = "1", sev_r = "5")
+    make_proc("CCC3", "2018-02-10", inmate = "1", sev_r = "10")
   )
   first <- build_cohort(recode_registry(do.call(make_raw, base_rows)),
                         out_dir = tmp_out, private_dir = tmp_priv,
@@ -251,4 +252,78 @@ test_that("leading zeros in MRNs do not create duplicate study IDs", {
   ids2 <- assign_study_ids(c("4221952", "01001042"), reg)
   expect_equal(ids1, ids2)
   expect_equal(anyDuplicated(ids1), 0L)
+})
+
+# ---------------------------------------------------------------------------
+# Common support
+# ---------------------------------------------------------------------------
+
+test_that("controls in a covariate level with no inmates are trimmed", {
+  raw <- make_raw(
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10"),
+    make_proc("INM2", "2018-02-10", inmate = "1", sev_r = "10"),
+    make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10"),
+    make_proc("CTL2", "2019-07-01", inmate = "0", sev_r = "10"),
+    # No inmate is on dialysis, so this control is off-support.
+    make_proc("DIAL", "2019-08-01", inmate = "0", sev_r = "10", Dialysis = "2")
+  )
+  proc <- recode_registry(raw)
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  co <- build_cohort(proc, out_dir = tmp_out, private_dir = tmp_priv)
+
+  expect_equal(nrow(co$analytic), 4L)
+  expect_equal(sum(co$analytic$inmate == "Non-inmate"), 2L)
+  expect_true("dialysis" %in% co$support$variable)
+  expect_equal(sum(co$support$controls_dropped), 1L)
+  expect_true(file.exists(file.path(tmp_out, "common_support.csv")))
+  # dialysis is now constant, so it must be flagged for removal from the model.
+  expect_true("dialysis" %in% co$degenerate_vars)
+})
+
+test_that("inmates are never dropped by the common-support step", {
+  raw <- make_raw(
+    # The only dialysis patient is an inmate: no control-only level exists, so
+    # nothing is trimmed and the inmate stays.
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10", Dialysis = "2"),
+    make_proc("INM2", "2018-02-10", inmate = "1", sev_r = "10"),
+    make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10"),
+    make_proc("CTL2", "2019-07-01", inmate = "0", sev_r = "10")
+  )
+  proc <- recode_registry(raw)
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  co <- build_cohort(proc, out_dir = tmp_out, private_dir = tmp_priv)
+
+  expect_equal(sum(co$analytic$inmate == "Inmate"), 2L)
+  expect_equal(nrow(co$analytic), 4L)
+  expect_equal(nrow(co$support), 0L)
+})
+
+test_that("a missing ambulation code is treated as missing, not a category", {
+  raw <- make_raw(
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "10"),
+    make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10"),
+    make_proc("NOAMB", "2019-07-01", inmate = "0", sev_r = "10",
+              Ambulation = NA_character_)
+  )
+  proc <- recode_registry(raw)
+  expect_true(is.na(proc$ambulation[proc$mrn == "NOAMB"]))
+  expect_false("Unknown" %in% proc$ambulation)
+
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  co <- build_cohort(proc, out_dir = tmp_out, private_dir = tmp_priv)
+  expect_equal(nrow(co$analytic), 2L)
+})
+
+test_that("the supported cohort leaves no control-only covariate level", {
+  co <- build_test_cohort()
+  a <- co$analytic
+  for (v in intersect(SUPPORT_VARS, names(a))) {
+    lv  <- as.character(a[[v]])
+    inm <- unique(lv[a$inmate == "Inmate" & !is.na(lv)])
+    ctl <- unique(lv[a$inmate == "Non-inmate" & !is.na(lv)])
+    expect_length(setdiff(ctl, inm), 0)
+  }
 })

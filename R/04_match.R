@@ -40,7 +40,8 @@ report_variables <- c(
   "hypertension", "prior_amputation", "limb_severity"
 )
 
-run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
+run_matching <- function(analytic, ratio = 2, out_dir = here::here("output"),
+                         drop_vars = character()) {
 
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
@@ -48,7 +49,22 @@ run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
   dat <- analytic %>%
     dplyr::mutate(treat = as.integer(inmate == "Inmate"))
 
-  fml <- reformulate(match_variables, response = "treat")
+  # A covariate with no variation left after the common-support restriction
+  # cannot be estimated and would separate the propensity model. 03_cohort.R
+  # reports these in $degenerate_vars; we also re-check here so run_matching()
+  # is safe to call on its own.
+  constant <- match_variables[vapply(match_variables, function(v) {
+    x <- dat[[v]]
+    length(unique(x[!is.na(x)])) < 2L
+  }, logical(1))]
+  vars <- setdiff(match_variables, union(drop_vars, constant))
+  if (length(setdiff(match_variables, vars))) {
+    message("04_match.R: dropping covariate(s) with no variation in the ",
+            "supported cohort: ",
+            paste(setdiff(match_variables, vars), collapse = ", "), ".")
+  }
+
+  fml <- reformulate(vars, response = "treat")
 
   m.out <- MatchIt::matchit(
     fml,
@@ -72,7 +88,7 @@ run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
   # group means alongside the standardized differences.
   bal_full <- cobalt::bal.tab(
     m.out,
-    addl       = dat[, report_variables, drop = FALSE],
+    addl       = dat[, union(report_variables, setdiff(match_variables, vars)), drop = FALSE],
     un         = TRUE,
     disp       = c("means"),
     binary     = "std",
@@ -87,7 +103,7 @@ run_matching <- function(analytic, ratio = 2, out_dir = here::here("output")) {
 
   love <- cobalt::love.plot(
     m.out,
-    addl       = dat[, report_variables, drop = FALSE],
+    addl       = dat[, union(report_variables, setdiff(match_variables, vars)), drop = FALSE],
     stats      = "mean.diffs",
     thresholds = c(m = 0.1),
     binary     = "std",
