@@ -58,7 +58,7 @@ withCallingHandlers(
 
 ## ---- 3. REDCap import file ------------------------------------------------
 message("\n=== 3/4  REDCap import ===")
-generate_redcap_import()
+generate_redcap_import(v1_link = res$link)
 
 ## ---- 4. CONSORT diagram ---------------------------------------------------
 message("\n=== 4/4  CONSORT diagram ===")
