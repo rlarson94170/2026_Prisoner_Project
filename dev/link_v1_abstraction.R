@@ -31,6 +31,51 @@ V1_CENSOR_DATE <- as.Date("2020-03-23")   # "Today" column in the v1 workbook
 # the v1 workbooks store them as numbers. Normalise both sides before joining.
 norm_mrn <- function(x) sub("^0+", "", trimws(as.character(x)))
 
+# Tolerant date coercion for the 2020 workbook.
+#
+# That file was maintained by hand and five cells in the follow-up columns hold
+# the literal text "None" rather than being blank. readxl therefore types the
+# whole column as character, and as.Date() then fails outright with "character
+# string is not in a standard unambiguous format". Coerce tolerantly instead:
+# real dates pass through, recognised placeholders become NA, and anything else
+# becomes NA with a warning naming the offending value so a genuine typo is not
+# silently discarded.
+#
+# Day-first formats are deliberately NOT attempted. These are US clinical
+# records, so a d/m/Y guess would misparse rather than fail, which is worse.
+.v1_na_strings <- c("none", "na", "n/a", "nan", "-", "--", "", "unk", "unknown",
+                    "null", "?")
+
+as_v1_date <- function(x, field = "date") {
+  if (inherits(x, "Date"))   return(x)
+  if (inherits(x, "POSIXt")) return(as.Date(x))
+  if (is.numeric(x))         return(as.Date(x, origin = "1899-12-30"))
+
+  chr   <- trimws(as.character(x))
+  blank <- is.na(chr) | tolower(chr) %in% .v1_na_strings
+  out   <- rep(as.Date(NA), length(chr))
+
+  # Excel occasionally hands back a serial number as text.
+  serial <- !blank & grepl("^[0-9]{5}(\\.[0-9]+)?$", chr)
+  if (any(serial)) {
+    out[serial] <- as.Date(as.numeric(chr[serial]), origin = "1899-12-30")
+  }
+
+  for (f in c("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%Y/%m/%d")) {
+    todo <- !blank & is.na(out)
+    if (!any(todo)) break
+    out[todo] <- suppressWarnings(as.Date(chr[todo], format = f))
+  }
+
+  bad <- unique(chr[!blank & is.na(out)])
+  if (length(bad)) {
+    warning("read_v1(): could not parse ", length(bad), " distinct value(s) in ",
+            field, ": ", paste(bad, collapse = ", "),
+            ". Treated as missing.", call. = FALSE)
+  }
+  out
+}
+
 # ---- Readers --------------------------------------------------------------
 
 read_v1 <- function(v1_dir = V1_DIR_DEFAULT) {
@@ -46,23 +91,26 @@ read_v1 <- function(v1_dir = V1_DIR_DEFAULT) {
   }
 
   detail <- readxl::read_excel(f_detail, sheet = "Detailed chart w outcomes") %>%
-    dplyr::rename_with(~ gsub(" ", " ", .x)) %>%   # a header holds nbsp
+    # One header ("1st\u00a0reinterv") contains a non-breaking space. Write it as
+    # an escape rather than a literal byte so the file stays pure ASCII and
+    # parses the same under any locale.
+    dplyr::rename_with(~ gsub("\u00a0", " ", .x, fixed = TRUE)) %>%
     dplyr::transmute(
       v1_inmate        = .data$Inmate == "Y",
       mrn              = norm_mrn(.data$MRN),
-      v1_proc_date     = as.Date(.data$`Procedure date`),
-      v1_admit_date    = as.Date(.data$`Admit date`),
-      v1_dc_date       = as.Date(.data$`d/c date`),
+      v1_proc_date     = as_v1_date(.data$`Procedure date`, "Procedure date"),
+      v1_admit_date    = as_v1_date(.data$`Admit date`, "Admit date"),
+      v1_dc_date       = as_v1_date(.data$`d/c date`, "d/c date"),
       v1_reint_any     = .data$Reintervention == "Y",
       v1_n_reint       = as.integer(.data$`# of reinterventions`),
-      v1_reint1_date   = as.Date(.data$`1st reinterv`),
-      v1_reint2_date   = as.Date(.data$`2nd reinterv`),
-      v1_first_fu_date = as.Date(.data$`1st f/u`),
-      v1_last_fu_date  = as.Date(.data$`Last f/u date`),
+      v1_reint1_date   = as_v1_date(.data$`1st reinterv`, "1st reinterv"),
+      v1_reint2_date   = as_v1_date(.data$`2nd reinterv`, "2nd reinterv"),
+      v1_first_fu_date = as_v1_date(.data$`1st f/u`, "1st f/u"),
+      v1_last_fu_date  = as_v1_date(.data$`Last f/u date`, "Last f/u date"),
       v1_ltf_flag      = .data$`Loss to f/u?` == "Y",
       v1_amp_any       = .data$Amputation == "Y",
-      v1_amp_date      = as.Date(.data$`Amputation date`),
-      v1_death_date    = as.Date(.data$`Death date`),
+      v1_amp_date      = as_v1_date(.data$`Amputation date`, "Amputation date"),
+      v1_death_date    = as_v1_date(.data$`Death date`, "Death date"),
       v1_details       = .data$Details
     )
 
@@ -71,9 +119,9 @@ read_v1 <- function(v1_dir = V1_DIR_DEFAULT) {
   readmit <- readmit_raw %>%
     dplyr::transmute(
       mrn                = norm_mrn(.data$MRN),
-      v1_proc_date       = as.Date(.data$`Procedure date`),
+      v1_proc_date       = as_v1_date(.data$`Procedure date`, "Procedure date"),
       v1_readmit_dates   = apply(
-        dplyr::across(dplyr::all_of(rcols), ~ as.Date(.x)), 1L,
+        dplyr::across(dplyr::all_of(rcols), ~ as_v1_date(.x, "readmission date")), 1L,
         function(x) list(sort(as.Date(x[!is.na(x)], origin = "1970-01-01")))
       ) %>% unlist(recursive = FALSE),
       v1_readmit_details = .data$Details
@@ -83,7 +131,7 @@ read_v1 <- function(v1_dir = V1_DIR_DEFAULT) {
     dplyr::transmute(
       mrn            = norm_mrn(.data$mrn),
       v1_inmate      = .data$inmate == 1,
-      v1_proc_date   = as.Date(.data$procedure_date)
+      v1_proc_date   = as_v1_date(.data$procedure_date, "procedure_date")
     )
 
   # Derived fields that the current dictionary asks for, recomputed under the
