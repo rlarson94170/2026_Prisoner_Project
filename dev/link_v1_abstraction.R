@@ -258,12 +258,17 @@ link_v1_abstraction <- function(
 #' re-adjudicate from the note instead of reopening the chart.
 # Free-text digest of a v1 record. Shared by both carry-over paths below.
 .v1_digest <- function(d) {
+  fmt <- function(x) ifelse(is.na(x), "none", format(x, "%m/%d/%Y"))
   paste0(
     "v1 reint: ", ifelse(d$v1_reint_any, "Y", "N"),
-    " (n=", d$v1_n_reint, "; ",
-    paste(format(d$v1_reint1_date, "%m/%d/%Y"),
-          format(d$v1_reint2_date, "%m/%d/%Y"), sep = ", "), ")",
+    " (n=", d$v1_n_reint, "; ", fmt(d$v1_reint1_date), ", ",
+    fmt(d$v1_reint2_date), ")",
     " | v1 amp: ", ifelse(d$v1_amp_any, "Y", "N"),
+    " on ", fmt(d$v1_amp_date),
+    " (limb not recorded in 2020)",
+    " | v1 readmissions in 1y: ", d$v1_n_readmit_1yr,
+    ", first ", fmt(d$v1_first_readmit_date),
+    " (ALL-CAUSE incl. planned)",
     " | v1 LTF: ", ifelse(d$v1_ltf_flag, "Y", "N"),
     " | v1 obs to 2020-03-23: ", d$v1_obs_days, "d",
     " | detail: ", dplyr::coalesce(d$v1_details, ""),
@@ -274,17 +279,30 @@ link_v1_abstraction <- function(
 prefill_from_v1 <- function(link, workbook_df) {
 
   # ---- Same index procedure: values are directly comparable ----------------
+  #
+  # Only fields that are BOTH definitionally unchanged AND not gated behind a
+  # parent we cannot assert are written into answer cells. Three fields were
+  # dropped from this list after the first REDCap import:
+  #
+  #   major_amp_date      shows only if major_amp = 1, and 2020 did not record
+  #                       which limb was amputated, so index-limb major
+  #                       amputation cannot be asserted from it.
+  #   first_readmit_date  both show only if readmit_1yr = 1, which is defined
+  #   n_readmit_1yr       here as an UNPLANNED readmission. The 2020 count is
+  #                       all-cause and includes planned admissions.
+  #
+  # Writing a child field without its parent also made REDCap prompt "erase the
+  # values of fields to be hidden?" every time an abstractor opened one of those
+  # records - one stray click on Erase and the carry-over was gone. Their values
+  # now travel in v1_source_text instead, where they inform without asserting.
   same <- dplyr::filter(link, .data$v1_status == "reusable_same_index")
   reusable <- tibble::tibble(
     study_id           = same$study_id,
     vital_status       = ifelse(is.na(same$v1_death_date), "alive", "dead"),
     death_date         = format(same$v1_death_date, "%m/%d/%Y"),
     last_alive_date    = format(same$v1_last_fu_date, "%m/%d/%Y"),
-    major_amp_date     = format(same$v1_amp_date, "%m/%d/%Y"),
     first_fu_date      = format(same$v1_first_fu_date, "%m/%d/%Y"),
     days_to_first_fu   = as.character(same$v1_days_to_first_fu),
-    first_readmit_date = format(same$v1_first_readmit_date, "%m/%d/%Y"),
-    n_readmit_1yr      = as.character(same$v1_n_readmit_1yr),
     v1_source_text     = .v1_digest(same),
     v1_reused          = 1L
   )

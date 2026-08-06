@@ -41,9 +41,8 @@ build_redcap_import <- function(matched, crosswalk, v1_link = NULL) {
     if (!exists("prefill_from_v1")) {
       stop("Source dev/link_v1_abstraction.R before passing v1_link.", call. = FALSE)
     }
-    blanks <- c("vital_status", "death_date", "last_alive_date", "major_amp_date",
-                "first_fu_date", "days_to_first_fu", "first_readmit_date",
-                "n_readmit_1yr", "v1_source_text")
+    blanks <- c("vital_status", "death_date", "last_alive_date",
+                "first_fu_date", "days_to_first_fu", "v1_source_text")
     for (nm in blanks) out[[nm]] <- NA_character_
     out$v1_reused <- 0L
 
@@ -52,8 +51,7 @@ build_redcap_import <- function(matched, crosswalk, v1_link = NULL) {
 
     # prefill_from_v1() formats dates M/D/Y for the Excel workbook; REDCap wants
     # Y-M-D on import.
-    for (nm in c("death_date", "last_alive_date", "major_amp_date",
-                 "first_fu_date", "first_readmit_date")) {
+    for (nm in c("death_date", "last_alive_date", "first_fu_date")) {
       out[[nm]] <- ifelse(is.na(out[[nm]]), NA_character_,
                           format(as.Date(out[[nm]], format = "%m/%d/%Y"),
                                  "%Y-%m-%d"))
