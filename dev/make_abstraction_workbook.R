@@ -79,7 +79,8 @@ build_prefill <- function(matched, crosswalk) {
   )
 }
 
-build_abstraction_workbook <- function(matched, crosswalk, path) {
+build_abstraction_workbook <- function(matched, crosswalk, path,
+                                       v1_link = NULL) {
   if (!requireNamespace("openxlsx", quietly = TRUE)) {
     stop("Package 'openxlsx' is required. install.packages('openxlsx')", call. = FALSE)
   }
@@ -88,8 +89,32 @@ build_abstraction_workbook <- function(matched, crosswalk, path) {
 
   # Full data frame: prefilled reference columns, then blank to-fill columns.
   dat <- prefill
-  for (nm in .tofill_cols) dat[[nm]] <- NA
+  # Character, not bare NA (logical): the chart-based cells hold text, dates
+  # and coded values, and a logical column cannot accept them when the v1
+  # carry-over writes into it.
+  for (nm in .tofill_cols) dat[[nm]] <- NA_character_
   n <- nrow(dat)
+
+  # Optional: carry over the 2020 ("version 1") abstraction where it links on
+  # MRN + index procedure date. Only the fields whose v1 definition matches the
+  # current dictionary are written into the answer cells; everything that v1
+  # recorded under a different definition (reintervention type and laterality,
+  # planned vs unplanned readmission, loss to follow-up) is left blank and the
+  # v1 free text is dropped into v1_source_text so the abstractor can
+  # re-adjudicate from the note instead of reopening the chart.
+  v1_cols <- character(0)
+  if (!is.null(v1_link)) {
+    if (!exists("prefill_from_v1")) {
+      stop("Source dev/link_v1_abstraction.R before passing v1_link.", call. = FALSE)
+    }
+    dat$v1_reused      <- 0L
+    dat$v1_source_text <- NA_character_
+    v1_cols <- c("v1_reused", "v1_source_text")
+    dat <- prefill_from_v1(v1_link, dat)
+    dat$v1_reused[is.na(dat$v1_reused)] <- 0L
+    message("build_abstraction_workbook(): carried over v1 data for ",
+            sum(dat$v1_reused == 1L), " of ", n, " patients.")
+  }
 
   wb <- openxlsx::createWorkbook()
 
@@ -108,7 +133,17 @@ build_abstraction_workbook <- function(matched, crosswalk, path) {
     "Categorical cells have dropdowns. When a chart is ambiguous, describe it in notes.",
     "",
     "This file contains MRNs and dates. Keep it off GitHub and store it securely.",
-    "See the Codebook tab for every field's definition and allowed values."
+    "See the Codebook tab for every field's definition and allowed values.",
+    "",
+    "Purple columns (if present) come from the 2020 abstraction of this same",
+    "patient. v1_reused = 1 means some answer cells were carried over: survival,",
+    "death date, first follow-up, amputation date and readmission counts, whose",
+    "definitions are unchanged. Verify them, do not assume them.",
+    "v1_source_text holds the 2020 free-text notes. Use it to re-adjudicate the",
+    "fields whose definitions DID change (reintervention type and laterality,",
+    "planned vs unplanned readmission, loss to follow-up) without reopening the",
+    "chart. The 2020 review stopped on 2020-03-23, so anything needing a full",
+    "year past that date still needs the chart."
   )
   openxlsx::writeData(wb, "Instructions", instr)
   openxlsx::setColWidths(wb, "Instructions", cols = 1, widths = 110)
@@ -127,9 +162,22 @@ build_abstraction_workbook <- function(matched, crosswalk, path) {
   ref_body <- openxlsx::createStyle(fgFill = "#EDEDED")
 
   n_ref <- length(ref_cols)
+  v1_hdr <- openxlsx::createStyle(fgFill = "#6A4C93", fontColour = "#FFFFFF",
+                                  textDecoration = "bold", halign = "center",
+                                  border = "TopBottomLeftRight", borderColour = "#BFBFBF")
+  v1_body <- openxlsx::createStyle(fgFill = "#F1ECF7")
+  n_fill <- ncol(dat) - n_ref - length(v1_cols)
   openxlsx::addStyle(wb, sheet, ref_hdr,  rows = 1, cols = seq_len(n_ref), gridExpand = TRUE)
   openxlsx::addStyle(wb, sheet, fill_hdr, rows = 1,
-                     cols = (n_ref + 1):ncol(dat), gridExpand = TRUE)
+                     cols = (n_ref + 1):(n_ref + n_fill), gridExpand = TRUE)
+  if (length(v1_cols)) {
+    v1_idx <- match(v1_cols, names(dat))
+    openxlsx::addStyle(wb, sheet, v1_hdr, rows = 1, cols = v1_idx, gridExpand = TRUE)
+    if (n > 0) {
+      openxlsx::addStyle(wb, sheet, v1_body, rows = 2:(n + 1), cols = v1_idx,
+                         gridExpand = TRUE, stack = TRUE)
+    }
+  }
   if (n > 0) {
     openxlsx::addStyle(wb, sheet, ref_body, rows = 2:(n + 1),
                        cols = seq_len(n_ref), gridExpand = TRUE, stack = TRUE)
@@ -153,10 +201,11 @@ build_abstraction_workbook <- function(matched, crosswalk, path) {
   ## ---- Codebook -----------------------------------------------------------
   openxlsx::addWorksheet(wb, "Codebook")
   codebook <- tibble::tibble(
-    Column = c(ref_cols, .tofill_cols),
+    Column = c(ref_cols, .tofill_cols, v1_cols),
     Kind = c(rep("prefilled (do not edit)", length(ref_cols)),
-             rep("chart-based (fill in)", length(.tofill_cols))),
-    `Allowed values` = vapply(c(ref_cols, .tofill_cols), function(nm) {
+             rep("chart-based (fill in)", length(.tofill_cols)),
+             rep("2020 abstraction (reference)", length(v1_cols))),
+    `Allowed values` = vapply(c(ref_cols, .tofill_cols, v1_cols), function(nm) {
       if (!is.null(.abstraction_choices[[nm]])) paste(.abstraction_choices[[nm]], collapse = ", ")
       else if (grepl("date", nm)) "MM/DD/YYYY"
       else ""
@@ -179,7 +228,8 @@ build_abstraction_workbook <- function(matched, crosswalk, path) {
 generate_abstraction_workbook <- function(
     matched_path   = here::here("output",  "matched_cohort.rds"),
     crosswalk_path = here::here("private", "id_crosswalk.rds"),
-    out_path       = here::here("private", "abstraction_workbook_prefilled.xlsx")) {
+    out_path       = here::here("private", "abstraction_workbook_prefilled.xlsx"),
+    v1_link        = NULL) {
 
   if (!file.exists(matched_path)) {
     stop("Matched cohort not found at ", matched_path,
@@ -190,7 +240,7 @@ generate_abstraction_workbook <- function(
          ". Run run_all.R first.", call. = FALSE)
   }
   path <- build_abstraction_workbook(
-    readRDS(matched_path), readRDS(crosswalk_path), out_path
+    readRDS(matched_path), readRDS(crosswalk_path), out_path, v1_link = v1_link
   )
   message("Wrote ", path, " (", "keep this file off GitHub).")
   invisible(path)

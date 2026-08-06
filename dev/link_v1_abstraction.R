@@ -219,9 +219,9 @@ prefill_from_v1 <- function(link, workbook_df) {
       last_alive_date  = format(.data$v1_last_fu_date, "%m/%d/%Y"),
       major_amp_date   = format(.data$v1_amp_date, "%m/%d/%Y"),
       first_fu_date    = format(.data$v1_first_fu_date, "%m/%d/%Y"),
-      days_to_first_fu = .data$v1_days_to_first_fu,
+      days_to_first_fu = as.character(.data$v1_days_to_first_fu),
       first_readmit_date = format(.data$v1_first_readmit_date, "%m/%d/%Y"),
-      n_readmit_1yr    = .data$v1_n_readmit_1yr,
+      n_readmit_1yr    = as.character(.data$v1_n_readmit_1yr),
       v1_source_text   = paste0(
         "v1 reint: ", ifelse(.data$v1_reint_any, "Y", "N"),
         " (n=", .data$v1_n_reint, "; ",

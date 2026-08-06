@@ -28,8 +28,31 @@ build_redcap_import <- function(matched, crosswalk) {
     index_admit_date = ymd(ref$admit_date),
     index_proc_date  = ymd(ref$procedure_date),
     index_dc_date    = ymd(ref$discharge_date),
-    presentation     = ifelse(as.character(ref$presentation) == "CLTI", 2L, 1L)
+    presentation     = .presentation_code(ref$presentation)
   )
+}
+
+# REDCap coding for the prefilled `presentation` field. Asymptomatic patients
+# (limb severity 0) are a real part of this cohort - 30 of the 658 supported
+# patients - so they get their own code rather than being folded into
+# claudication. Keep this in step with the CodeList in
+# REDCap_Outcome_Abstraction_Project.xml and the Choices column in
+# REDCap_Outcome_Abstraction_DataDictionary.csv.
+.presentation_code <- function(x) {
+  x <- as.character(x)
+  out <- dplyr::case_when(
+    x == "Asymptomatic" ~ 0L,
+    x == "Claudication" ~ 1L,
+    x == "CLTI"         ~ 2L,
+    TRUE                ~ NA_integer_
+  )
+  if (anyNA(out)) {
+    stop("Unmapped presentation value(s): ",
+         paste(unique(x[is.na(out)]), collapse = ", "),
+         ". Add the code to .presentation_code(), the REDCap data dictionary ",
+         "and the project XML together.", call. = FALSE)
+  }
+  out
 }
 
 generate_redcap_import <- function(
