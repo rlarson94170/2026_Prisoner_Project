@@ -288,11 +288,21 @@ apply_common_support <- function(index, support_vars = SUPPORT_VARS) {
     length(unique(as.character(out[[v]][!is.na(out[[v]])]))) < 2L
   }, logical(1))]
 
+  # A control can be off-support on more than one covariate, so the per-level
+  # counts in `log` can sum to more than the number of patients removed. The
+  # distinct count is what belongs in the CONSORT diagram.
+  attr(out, "total_dropped") <- sum(drop)
+
   if (nrow(log)) {
     message("03_cohort.R: common support dropped ", sum(drop),
-            " control(s) in ", nrow(log), " covariate level(s) with no inmates: ",
+            " control(s) across ", nrow(log),
+            " covariate level(s) with no inmates: ",
             paste(sprintf("%s=%s (n=%d)", log$variable, log$level,
-                          log$controls_dropped), collapse = ", "), ".")
+                          log$controls_dropped), collapse = ", "),
+            if (sum(log$controls_dropped) > sum(drop)) {
+              sprintf(" (levels overlap: %d level memberships, %d distinct patients)",
+                      sum(log$controls_dropped), sum(drop))
+            } else "", ".")
   }
   if (length(degenerate)) {
     message("03_cohort.R: covariate(s) with no remaining variation, to be ",
@@ -407,6 +417,7 @@ build_cohort <- function(proc,
   index           <- apply_common_support(index)
   support_log     <- attr(index, "support_log")
   degenerate_vars <- attr(index, "degenerate_vars")
+  support_dropped <- attr(index, "total_dropped")
   n_support       <- nrow(index)
   if (!is.null(support_log) && nrow(support_log)) {
     readr::write_csv(support_log, file.path(out_dir, "common_support.csv"))
@@ -469,5 +480,6 @@ build_cohort <- function(proc,
        flow            = flow,
        updates         = updates_log,
        support         = support_log,
+       support_dropped = support_dropped,
        degenerate_vars = degenerate_vars)
 }

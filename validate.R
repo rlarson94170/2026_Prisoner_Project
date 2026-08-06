@@ -139,9 +139,23 @@ if (!file.exists(here::here("config.R"))) {
   # 1"). 03_cohort.R trims them; this confirms none survived.
   sup <- cohort$support
   if (!is.null(sup) && nrow(sup)) {
-    message(sprintf("Note: common support dropped %d control(s) across %d level(s): %s.",
-                    sum(sup$controls_dropped), nrow(sup),
-                    paste(sprintf("%s=%s", sup$variable, sup$level), collapse = ", ")))
+    # Report the DISTINCT patient count, not the sum of per-level counts: a
+    # control can be off-support on more than one covariate. The distinct count
+    # is the one that matches the cohort flow and belongs in the CONSORT.
+    n_dropped <- cohort$support_dropped
+    if (is.null(n_dropped)) n_dropped <- sum(sup$controls_dropped)
+    message(sprintf("Note: common support dropped %d control(s) across %d level(s): %s.%s",
+                    n_dropped, nrow(sup),
+                    paste(sprintf("%s=%s (n=%d)", sup$variable, sup$level,
+                                  sup$controls_dropped), collapse = ", "),
+                    if (sum(sup$controls_dropped) > n_dropped)
+                      sprintf(" Levels overlap: %d memberships, %d patients.",
+                              sum(sup$controls_dropped), n_dropped) else ""))
+
+    flow_drop <- cohort$flow$n[7] - cohort$flow$n[8]
+    check("Common-support count matches the cohort flow",
+          identical(as.integer(n_dropped), as.integer(flow_drop)),
+          note = sprintf("log %d vs flow %d", n_dropped, flow_drop))
   }
 
   offenders <- character()
