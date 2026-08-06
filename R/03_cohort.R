@@ -413,6 +413,24 @@ build_cohort <- function(proc,
                   !is.na(.data$race), !is.na(.data$urgency))
   n_index <- nrow(index)
 
+  # Inmate prevalence by EMR era, measured on the index admissions before the
+  # common-support restriction. The restriction is a modelling choice about who
+  # can be matched and says nothing about how patients were identified, so
+  # folding it into the denominator would understate the pool the identification
+  # sweep had to search. These are the figures for the ascertainment limitation.
+  # Counts only, no PHI.
+  ascertainment <- index %>%
+    dplyr::mutate(era = ifelse(
+      as.integer(format(.data$procedure_date, "%Y")) <= 2019,
+      "2016-2019 (Cerner)", "2020-2024 (Epic)")) %>%
+    dplyr::group_by(.data$era) %>%
+    dplyr::summarise(inmates = sum(.data$inmate == 1),
+                     n       = dplyr::n(),
+                     pct     = round(100 * sum(.data$inmate == 1) / dplyr::n(), 1),
+                     .groups = "drop")
+  readr::write_csv(ascertainment,
+                   file.path(out_dir, "ascertainment_by_era.csv"))
+
   # Restrict the control pool to the region of common support.
   index           <- apply_common_support(index)
   support_log     <- attr(index, "support_log")
@@ -481,5 +499,6 @@ build_cohort <- function(proc,
        updates         = updates_log,
        support         = support_log,
        support_dropped = support_dropped,
-       degenerate_vars = degenerate_vars)
+       degenerate_vars = degenerate_vars,
+       ascertainment   = ascertainment)
 }

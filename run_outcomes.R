@@ -34,7 +34,27 @@ outcomes <- readr::read_csv(outcomes_path, show_col_types = FALSE)
 # Doubly-robust adjustment: covariate-adjust the outcome models for the
 # covariates that validate.R flags as residually imbalanced (|SMD| 0.10-0.25).
 # Keep this list short to avoid overfitting the small number of events.
-adjust_vars <- c("prior_ipsi_revasc")
+#
+# PRE-SPECIFIED 2026-08-06, from the validation run on the final 658-patient
+# supported cohort (39 inmates, 78 matched controls, max |SMD| 0.160). Fixed
+# before any outcome data existed, so this is a pre-specified choice rather than
+# one made after seeing results. Do not revise it once abstraction has begun
+# without recording why.
+#
+# The earlier default was prior_ipsi_revasc, which balanced out once the
+# propensity model was corrected for common support and is no longer an
+# offender.
+adjust_vars <- c("clti", "chf_symptomatic", "race")
+
+# Sanity check: the adjustment set should still be the covariates validate.R
+# flags. If a re-run of run_all.R changes the matched set, re-read
+# output/validation_report.txt and update the list above deliberately.
+missing_adj <- setdiff(adjust_vars, names(matched))
+if (length(missing_adj)) {
+  warning("adjust_vars not present in the matched cohort: ",
+          paste(missing_adj, collapse = ", "),
+          ". Check that the matching spec has not changed.", call. = FALSE)
+}
 
 res <- run_outcomes(matched, outcomes, adjust_vars = adjust_vars)
 

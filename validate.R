@@ -120,17 +120,21 @@ if (!file.exists(here::here("config.R"))) {
   # moved from Cerner to Epic. A large prevalence gap across that boundary is
   # evidence of under-ascertainment in the earlier era rather than a real
   # change in the incarcerated caseload.
-  if (file.exists(cw_path)) {
-    cw  <- readRDS(cw_path)
-    yr  <- as.integer(format(as.Date(cw$procedure_date), "%Y"))
-    era <- ifelse(yr <= 2019, "2016-2019 (Cerner)", "2020-2024 (Epic)")
-    is_inm <- analytic$inmate[match(cw$study_id, analytic$study_id)] == "Inmate"
-    for (e in sort(unique(era))) {
-      k <- era == e
-      message(sprintf("Note: inmate prevalence %s = %d/%d (%.1f%%).",
-                      e, sum(is_inm[k]), sum(k),
-                      100 * sum(is_inm[k]) / sum(k)))
+  #
+  # 03_cohort.R computes this on the INDEX admissions, before the
+  # common-support restriction: that restriction is a modelling choice about
+  # who can be matched and says nothing about how patients were identified, so
+  # trimming it into the denominator would understate the pool the sweep had to
+  # search. These are the figures that belong in the manuscript.
+  asc <- cohort$ascertainment
+  if (!is.null(asc) && nrow(asc)) {
+    for (i in seq_len(nrow(asc))) {
+      message(sprintf("Note: inmate prevalence %s = %d/%d (%.1f%%) of index admissions.",
+                      asc$era[i], asc$inmates[i], asc$n[i], asc$pct[i]))
     }
+    message("Note: denominators above are index admissions, before common ",
+            "support; the supported cohort used for matching is smaller. ",
+            "Written to output/ascertainment_by_era.csv.")
   }
 
   # --- Common support ------------------------------------------------------
