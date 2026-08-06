@@ -22,7 +22,11 @@ build_test_cohort <- function() {
     make_proc("NOSEV", "2019-03-01", inmate = "0", sev_r = "11", sev_l = "11"),
     # Non-inmate male: earliest admission hybrid (dropped), later clean one is index.
     make_proc("HYBMIX", "2016-05-01", inmate = "0", hybrid = TRUE, sev_r = "10"),
-    make_proc("HYBMIX", "2017-08-01", inmate = "0", hybrid = FALSE, sev_r = "10")
+    make_proc("HYBMIX", "2017-08-01", inmate = "0", hybrid = FALSE, sev_r = "10"),
+    # Implausible age (data-entry error) -> excluded by the adult floor.
+    make_proc("BABY", "2017-01-16", inmate = "0", age = 0, sev_r = "10"),
+    # Genuine minor -> also excluded.
+    make_proc("TEEN", "2017-04-11", inmate = "0", age = 13, sev_r = "10")
   )
   proc <- recode_registry(raw)
   tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
@@ -39,10 +43,20 @@ test_that("cohort size and group counts follow the rules", {
   expect_equal(sum(a$inmate == "Non-inmate"), 2L)  # CTL1, HYBMIX
 })
 
-test_that("females and hybrid-only patients are excluded", {
+test_that("females, hybrid-only, and under-age patients are excluded", {
   co <- build_test_cohort()
-  # 5 retained; FEM, HYB, NOSEV are gone. Confirm via the flow counts.
-  expect_equal(co$flow$n, c(12L, 11L, 9L, 8L, 7L, 5L))
+  # 5 retained; FEM, HYB, NOSEV, BABY, TEEN are gone. Confirm via flow counts.
+  expect_equal(co$flow$n, c(14L, 13L, 11L, 9L, 8L, 7L, 5L))
+  expect_match(co$flow$step[4], "age < 18")
+  expect_false(any(co$analytic$age < 18))
+})
+
+test_that("excluded minors are listed for review", {
+  co <- build_test_cohort()
+  f <- file.path(co$private_dir, "excluded_under_age.csv")
+  expect_true(file.exists(f))
+  ex <- readr::read_csv(f, show_col_types = FALSE)
+  expect_setequal(as.character(ex$mrn), c("BABY", "TEEN"))
 })
 
 test_that("crossover patients are classified as inmates with one index row", {
@@ -77,4 +91,164 @@ test_that("inmate is a factor with non-inmate as the reference level", {
   co <- build_test_cohort()
   expect_s3_class(co$analytic$inmate, "factor")
   expect_equal(levels(co$analytic$inmate), c("Non-inmate", "Inmate"))
+})
+
+# ---------------------------------------------------------------------------
+# Patient updates (inmate flag and DOB-derived age)
+# ---------------------------------------------------------------------------
+
+# Build a cohort with a patient-updates file applied. `upd` is a data frame in
+# the Patient Updates.xlsx column style.
+build_with_updates <- function(upd) {
+  raw <- make_raw(
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "5"),
+    make_proc("MISSED", "2016-01-12", inmate = "0", sev_r = "10"),
+    make_proc("MISSED", "2019-05-01", inmate = "0", sev_r = "10"),
+    make_proc("BADAGE", "2017-01-16", inmate = "0", age = 0, sev_r = "10"),
+    make_proc("BADAGE", "2022-08-17", inmate = "0", age = 5, sev_r = "10"),
+    make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10"),
+    make_proc("CTL2", "2019-07-01", inmate = "0", sev_r = "10")
+  )
+  proc <- recode_registry(raw)
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  dir.create(tmp_priv, recursive = TRUE, showWarnings = FALSE)
+  upath <- file.path(tmp_priv, "patient_updates.csv")
+  readr::write_csv(upd, upath)
+  cohort <- build_cohort(proc, out_dir = tmp_out, private_dir = tmp_priv,
+                         updates_path = upath)
+  c(cohort, list(out_dir = tmp_out, private_dir = tmp_priv))
+}
+
+test_that("an Inmate = yes update reclassifies the patient", {
+  co <- build_with_updates(
+    tibble::tibble(MRN = "MISSED", Inmate = "yes", Note = "missed by IT sweep")
+  )
+  expect_equal(sum(co$analytic$inmate == "Inmate"), 2L)   # INM1 + MISSED
+  expect_true(all(co$updates$status == "matched 2 row(s)" |
+                    co$updates$status == "matched 1 row(s)"))
+})
+
+test_that("yes/no, y/n, true/false and 1/0 are all accepted", {
+  for (v in c("yes", "Y", "TRUE", "1")) {
+    co <- build_with_updates(tibble::tibble(MRN = "MISSED", Inmate = v))
+    expect_equal(sum(co$analytic$inmate == "Inmate"), 2L, info = v)
+  }
+  for (v in c("no", "N", "FALSE", "0")) {
+    co <- build_with_updates(tibble::tibble(MRN = "CTL1", Inmate = v))
+    expect_equal(sum(co$analytic$inmate == "Inmate"), 1L, info = v)
+  }
+})
+
+test_that("a Surgery Date scopes an inmate update to one procedure", {
+  co <- build_with_updates(
+    tibble::tibble(MRN = "MISSED", `Surgery Date` = "2016-01-12", Inmate = "yes")
+  )
+  # The 2019 admission becomes a crossover non-inmate row and is dropped, so
+  # MISSED contributes exactly one index admission, as an inmate.
+  expect_equal(sum(co$analytic$inmate == "Inmate"), 2L)
+  # BADAGE has no DOB here, so the adult floor removes it: CTL1 + CTL2 remain.
+  expect_equal(sum(co$analytic$inmate == "Non-inmate"), 2L)
+})
+
+test_that("a DOB recomputes age for every procedure and rescues a bad age", {
+  co <- build_with_updates(
+    tibble::tibble(MRN = "BADAGE", DOB = "1944-11-12",
+                   `Surgery Date` = "2017-01-16", Inmate = "no")
+  )
+  # Recorded ages were 0 and 5; true ages are 72 and 77. Without the DOB the
+  # adult floor would discard this patient entirely.
+  ages <- co$analytic$age[co$analytic$study_id %in% co$analytic$study_id]
+  expect_true(72 %in% co$analytic$age)
+  expect_false(any(co$analytic$age < 18))
+  expect_match(co$updates$fields[1], "age \\(0/5 -> 72/77\\)")
+  expect_false(file.exists(file.path(co$private_dir, "excluded_under_age.csv")))
+})
+
+test_that("without a DOB the bad-age patient is dropped by the adult floor", {
+  co <- build_with_updates(tibble::tibble(MRN = "CTL1", Inmate = "no"))
+  expect_false(any(co$analytic$age < 18))
+  ex <- readr::read_csv(file.path(co$private_dir, "excluded_under_age.csv"),
+                        show_col_types = FALSE)
+  expect_equal(unique(as.character(ex$mrn)), "BADAGE")
+})
+
+test_that("an update for an MRN absent from the export warns and is logged", {
+  expect_warning(
+    co <- build_with_updates(
+      tibble::tibble(MRN = c("MISSED", "GHOST"), Inmate = c("yes", "yes"))
+    ),
+    "absent from the"
+  )
+  expect_equal(co$updates$mrn[co$updates$status == "NOT FOUND in export"],
+               "GHOST")
+})
+
+test_that("no updates file is a no-op", {
+  raw <- make_raw(
+    make_proc("INM1", "2018-01-10", inmate = "1", sev_r = "5"),
+    make_proc("CTL1", "2019-06-01", inmate = "0", sev_r = "10")
+  )
+  proc <- recode_registry(raw)
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  co <- build_cohort(proc, out_dir = tmp_out, private_dir = tmp_priv,
+                     updates_path = file.path(tmp_priv, "nope.csv"))
+  expect_equal(sum(co$analytic$inmate == "Inmate"), 1L)
+  expect_equal(nrow(co$updates), 0L)
+})
+
+# ---------------------------------------------------------------------------
+# Stable study IDs
+# ---------------------------------------------------------------------------
+
+test_that("an MRN keeps its study ID when the cohort grows", {
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  reg <- file.path(tmp_priv, "study_id_registry.csv")
+
+  base_rows <- list(
+    make_proc("AAA1", "2018-01-10", inmate = "0", sev_r = "10"),
+    make_proc("CCC3", "2018-02-10", inmate = "1", sev_r = "5")
+  )
+  first <- build_cohort(recode_registry(do.call(make_raw, base_rows)),
+                        out_dir = tmp_out, private_dir = tmp_priv,
+                        id_registry_path = reg)
+  cw1 <- readRDS(file.path(tmp_priv, "id_crosswalk.rds"))
+
+  # Add a patient whose MRN sorts BEFORE an existing one. Under positional
+  # numbering this would renumber everyone; with the registry it must not.
+  second <- build_cohort(
+    recode_registry(do.call(make_raw, c(
+      base_rows, list(make_proc("BBB2", "2019-03-10", inmate = "0", sev_r = "10"))
+    ))),
+    out_dir = tmp_out, private_dir = tmp_priv, id_registry_path = reg
+  )
+  cw2 <- readRDS(file.path(tmp_priv, "id_crosswalk.rds"))
+
+  keep <- cw1$mrn
+  expect_equal(
+    cw2$study_id[match(keep, cw2$mrn)],
+    cw1$study_id[match(keep, cw1$mrn)]
+  )
+  expect_equal(nrow(cw2), nrow(cw1) + 1L)
+  expect_equal(anyDuplicated(cw2$study_id), 0L)
+})
+
+test_that("study IDs do not encode exposure", {
+  co <- build_test_cohort()
+  cw <- readRDS(file.path(co$private_dir, "id_crosswalk.rds"))
+  ids <- co$analytic$study_id[co$analytic$inmate == "Inmate"]
+  # Inmates must not occupy a contiguous block at the end of the ID sequence.
+  expect_false(all(ids == tail(sort(co$analytic$study_id), length(ids))))
+})
+
+test_that("leading zeros in MRNs do not create duplicate study IDs", {
+  tmp_priv <- file.path(tempdir(), paste0("priv_", as.integer(runif(1, 1, 1e8))))
+  tmp_out  <- file.path(tempdir(), paste0("out_",  as.integer(runif(1, 1, 1e8))))
+  reg <- file.path(tmp_priv, "study_id_registry.csv")
+  ids1 <- assign_study_ids(c("04221952", "1001042"), reg)
+  ids2 <- assign_study_ids(c("4221952", "01001042"), reg)
+  expect_equal(ids1, ids2)
+  expect_equal(anyDuplicated(ids1), 0L)
 })

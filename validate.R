@@ -65,6 +65,74 @@ if (!file.exists(here::here("config.R"))) {
                        sum(analytic$inmate == "Inmate"),
                        sum(analytic$inmate == "Non-inmate")))
 
+  # --- Age plausibility ----------------------------------------------------
+  check("No patient below the adult age floor",
+        all(analytic$age >= MIN_AGE),
+        note = sprintf("min age = %g (floor %g)", min(analytic$age), MIN_AGE))
+
+  check("No implausibly high ages",
+        all(analytic$age <= MAX_AGE),
+        note = sprintf("max age = %g (ceiling %g)", max(analytic$age), MAX_AGE))
+
+  # --- Patient updates -----------------------------------------------------
+  # Known corrections to the inmate flag and to age are supplied from the
+  # patient updates file. An update whose MRN is absent from the export names a
+  # patient the registry pull never contained. Those cannot be recovered (there
+  # is no reliable way to re-identify pre-Epic patients), so they are recorded
+  # as a documented exclusion rather than failed as a defect.
+  upd <- cohort$updates
+  if (!is.null(upd) && nrow(upd)) {
+    check("Patient updates file was read and applied",
+          any(upd$status != "NOT FOUND in export"),
+          note = sprintf("%d of %d updates matched the export",
+                         sum(upd$status != "NOT FOUND in export"), nrow(upd)))
+
+    missing <- upd[upd$status == "NOT FOUND in export", , drop = FALSE]
+    if (nrow(missing)) {
+      readr::write_csv(missing, here::here("private",
+                                           "known_missing_patients.csv"))
+      message(sprintf(
+        "Note: %d known patient(s) are absent from the registry pull and are excluded by necessity (%d of them inmates). Listed in private/known_missing_patients.csv for the limitations section.",
+        nrow(missing), sum(missing$inmate == 1, na.rm = TRUE)))
+    }
+  } else {
+    message("Note: no patient updates file in use.")
+  }
+
+  # --- Study ID stability --------------------------------------------------
+  reg_path <- here::here("private", "study_id_registry.csv")
+  cw_path  <- here::here("private", "id_crosswalk.rds")
+  if (file.exists(reg_path) && file.exists(cw_path)) {
+    reg <- readr::read_csv(reg_path, col_types = readr::cols(.default = "c"))
+    cw  <- readRDS(cw_path)
+    joined <- merge(
+      data.frame(mrn = norm_mrn(cw$mrn),  study_id = cw$study_id),
+      data.frame(mrn = norm_mrn(reg$mrn), reg_id   = reg$study_id),
+      by = "mrn", all.x = TRUE
+    )
+    check("Study IDs match the persisted registry",
+          !anyNA(joined$reg_id) && all(joined$study_id == joined$reg_id),
+          note = sprintf("%d MRNs in the registry", nrow(reg)))
+  }
+
+  # --- Inmate ascertainment by era (monitor, not pass/fail) ----------------
+  # The inmate flag came from an IT sweep whose method changed when the EMR
+  # moved from Cerner to Epic. A large prevalence gap across that boundary is
+  # evidence of under-ascertainment in the earlier era rather than a real
+  # change in the incarcerated caseload.
+  if (file.exists(cw_path)) {
+    cw  <- readRDS(cw_path)
+    yr  <- as.integer(format(as.Date(cw$procedure_date), "%Y"))
+    era <- ifelse(yr <= 2019, "2016-2019 (Cerner)", "2020-2024 (Epic)")
+    is_inm <- analytic$inmate[match(cw$study_id, analytic$study_id)] == "Inmate"
+    for (e in sort(unique(era))) {
+      k <- era == e
+      message(sprintf("Note: inmate prevalence %s = %d/%d (%.1f%%).",
+                      e, sum(is_inm[k]), sum(k),
+                      100 * sum(is_inm[k]) / sum(k)))
+    }
+  }
+
   # --- Matching diagnostics ------------------------------------------------
   if (requireNamespace("MatchIt", quietly = TRUE) &&
       requireNamespace("cobalt", quietly = TRUE)) {
