@@ -256,34 +256,60 @@ link_v1_abstraction <- function(
 #' and laterality, readmission cause, loss to follow-up) are left blank and the
 #' relevant v1 free text is dropped into `v1_source_text` so the abstractor can
 #' re-adjudicate from the note instead of reopening the chart.
+# Free-text digest of a v1 record. Shared by both carry-over paths below.
+.v1_digest <- function(d) {
+  paste0(
+    "v1 reint: ", ifelse(d$v1_reint_any, "Y", "N"),
+    " (n=", d$v1_n_reint, "; ",
+    paste(format(d$v1_reint1_date, "%m/%d/%Y"),
+          format(d$v1_reint2_date, "%m/%d/%Y"), sep = ", "), ")",
+    " | v1 amp: ", ifelse(d$v1_amp_any, "Y", "N"),
+    " | v1 LTF: ", ifelse(d$v1_ltf_flag, "Y", "N"),
+    " | v1 obs to 2020-03-23: ", d$v1_obs_days, "d",
+    " | detail: ", dplyr::coalesce(d$v1_details, ""),
+    " | readmits: ", dplyr::coalesce(d$v1_readmit_details, "")
+  )
+}
+
 prefill_from_v1 <- function(link, workbook_df) {
 
-  reusable <- link %>%
-    dplyr::filter(.data$v1_status == "reusable_same_index") %>%
-    dplyr::transmute(
-      study_id,
-      vital_status     = ifelse(is.na(.data$v1_death_date), "alive", "dead"),
-      death_date       = format(.data$v1_death_date, "%m/%d/%Y"),
-      last_alive_date  = format(.data$v1_last_fu_date, "%m/%d/%Y"),
-      major_amp_date   = format(.data$v1_amp_date, "%m/%d/%Y"),
-      first_fu_date    = format(.data$v1_first_fu_date, "%m/%d/%Y"),
-      days_to_first_fu = as.character(.data$v1_days_to_first_fu),
-      first_readmit_date = format(.data$v1_first_readmit_date, "%m/%d/%Y"),
-      n_readmit_1yr    = as.character(.data$v1_n_readmit_1yr),
-      v1_source_text   = paste0(
-        "v1 reint: ", ifelse(.data$v1_reint_any, "Y", "N"),
-        " (n=", .data$v1_n_reint, "; ",
-        paste(format(.data$v1_reint1_date, "%m/%d/%Y"),
-              format(.data$v1_reint2_date, "%m/%d/%Y"), sep = ", "), ")",
-        " | v1 amp: ", ifelse(.data$v1_amp_any, "Y", "N"),
-        " | v1 LTF: ", ifelse(.data$v1_ltf_flag, "Y", "N"),
-        " | v1 obs to 2020-03-23: ", .data$v1_obs_days, "d",
-        " | detail: ", dplyr::coalesce(.data$v1_details, ""),
-        " | readmits: ", dplyr::coalesce(.data$v1_readmit_details, "")
-      ),
-      v1_reused = 1L
-    )
+  # ---- Same index procedure: values are directly comparable ----------------
+  same <- dplyr::filter(link, .data$v1_status == "reusable_same_index")
+  reusable <- tibble::tibble(
+    study_id           = same$study_id,
+    vital_status       = ifelse(is.na(same$v1_death_date), "alive", "dead"),
+    death_date         = format(same$v1_death_date, "%m/%d/%Y"),
+    last_alive_date    = format(same$v1_last_fu_date, "%m/%d/%Y"),
+    major_amp_date     = format(same$v1_amp_date, "%m/%d/%Y"),
+    first_fu_date      = format(same$v1_first_fu_date, "%m/%d/%Y"),
+    days_to_first_fu   = as.character(same$v1_days_to_first_fu),
+    first_readmit_date = format(same$v1_first_readmit_date, "%m/%d/%Y"),
+    n_readmit_1yr      = as.character(same$v1_n_readmit_1yr),
+    v1_source_text     = .v1_digest(same),
+    v1_reused          = 1L
+  )
+
+  # ---- Same patient, DIFFERENT index procedure -----------------------------
+  # Time zero differs, so nothing can be copied: every interval in the 2020
+  # record is measured from the wrong day. The notes are still useful context
+  # for the abstractor, who would otherwise rediscover the same history from
+  # the chart. Surface them with a loud label and leave v1_reused at 0 so the
+  # audit trail does not claim a carry-over that did not happen.
+  oth <- dplyr::filter(link, .data$v1_status == "same_patient_other_index")
+  other <- tibble::tibble(
+    study_id       = oth$study_id,
+    v1_source_text = paste0(
+      "*** DIFFERENT INDEX - CONTEXT ONLY, DO NOT COPY VALUES *** ",
+      "The 2020 review used ", format(oth$v1_proc_date, "%m/%d/%Y"),
+      ", ", oth$date_gap, " days from this index (",
+      format(oth$cur_proc_date, "%m/%d/%Y"),
+      "), so its intervals are measured from the wrong day. ",
+      .v1_digest(oth)
+    ),
+    v1_reused = 0L
+  )
 
   workbook_df %>%
-    dplyr::rows_update(reusable, by = "study_id", unmatched = "ignore")
+    dplyr::rows_update(reusable, by = "study_id", unmatched = "ignore") %>%
+    dplyr::rows_update(other,    by = "study_id", unmatched = "ignore")
 }
